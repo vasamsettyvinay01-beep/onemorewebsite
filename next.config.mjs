@@ -1,6 +1,8 @@
-import type { NextConfig } from "next";
+// Plain ESM (not .ts): Hostinger's build servers lack the glibc for native SWC,
+// and the WASM fallback cannot compile a TypeScript config.
 
-const nextConfig: NextConfig = {
+/** @type {import('next').NextConfig} */
+const nextConfig = {
   // Static HTML export to /out — served as plain files on Hostinger (no Node server needed).
   output: "export",
   images: {
