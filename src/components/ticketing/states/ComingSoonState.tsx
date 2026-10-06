@@ -40,7 +40,7 @@ export function ComingSoonState({ event }: Props) {
           Join the community for first access the moment they drop.
         </p>
 
-        <dl className="mt-5 divide-y divide-ivory/10 border-y border-ivory/10 short:hidden md:mt-6">
+        <dl className="mt-5 divide-y divide-ivory/10 hidden border-y border-ivory/10 md:mt-6 md:block md:short:hidden">
           {spec.map((row) => (
             <div key={row.label} className="flex items-center justify-between gap-6 py-2.5">
               <dt className="eyebrow text-[0.56rem] tracking-[0.26em] text-ivory/45">{row.label}</dt>

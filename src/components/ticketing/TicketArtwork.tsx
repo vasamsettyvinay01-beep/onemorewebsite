@@ -7,32 +7,43 @@ import { ease } from "@/lib/motion";
 import { BrandLogo } from "@/components/ui/BrandLogo";
 
 /**
- * The image half of the ticket sheet. A slow push-in on the campaign art,
- * shaded into the panel beside it, with the seal set quietly on top.
+ * The image half of the ticket sheet. On mobile the whole artwork is shown
+ * uncropped, floated on a blurred copy of itself; on desktop it fills the
+ * column with a slow push-in, shaded into the panel beside it.
  */
 export function TicketArtwork({ event }: { event: OneMoreEvent }) {
   const art = event.ticketArtwork ?? event.artwork;
 
   return (
-    // on mobile the banner gives up height first so the panel below always fits
-    <div className="relative min-h-28 shrink basis-[clamp(9rem,32dvh,18rem)] overflow-hidden md:h-full">
+    // on mobile the artwork gives up height first so the panel below always fits
+    <div className="relative min-h-40 shrink basis-[48dvh] overflow-hidden md:h-full">
       {art.src ? (
-        <motion.div
-          className="absolute inset-0"
-          initial={{ scale: 1.12 }}
-          animate={{ scale: 1 }}
-          transition={{ duration: 9, ease: ease.cinematic }}
-        >
+        <>
           <Image
             src={art.src}
-            alt={art.alt}
+            alt=""
+            aria-hidden
             fill
-            sizes="(min-width: 768px) 32rem, 100vw"
-            className="object-cover"
-            style={{ objectPosition: art.focal ?? "50% 50%" }}
-            preload
+            sizes="100vw"
+            className="scale-125 object-cover opacity-55 blur-2xl md:hidden"
           />
-        </motion.div>
+          <motion.div
+            className="absolute inset-0"
+            initial={{ opacity: 0, scale: 1.06 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ duration: 1.6, ease: ease.cinematic }}
+          >
+            <Image
+              src={art.src}
+              alt={art.alt}
+              fill
+              sizes="(min-width: 768px) 28rem, 100vw"
+              className="object-contain drop-shadow-[0_18px_30px_rgba(0,0,0,0.55)] md:object-cover md:drop-shadow-none"
+              style={{ objectPosition: art.focal ?? "50% 50%" }}
+              preload
+            />
+          </motion.div>
+        </>
       ) : (
         <div
           className="absolute inset-0"
@@ -40,10 +51,10 @@ export function TicketArtwork({ event }: { event: OneMoreEvent }) {
         />
       )}
 
-      {/* shade into the panel: downwards on mobile, sideways on desktop */}
+      {/* mobile: a soft fade into the panel; desktop: shade sideways into the panel */}
       <div
         aria-hidden
-        className="absolute inset-0 bg-linear-to-b from-black/30 via-transparent via-75% to-[#0d0e0d] md:bg-linear-to-r md:via-0% md:from-transparent md:from-70% md:via-transparent md:to-[#0d0e0d]/80"
+        className="absolute inset-x-0 bottom-0 h-10 bg-linear-to-b from-transparent to-[#0d0e0d] md:inset-0 md:h-auto md:bg-linear-to-r md:from-transparent md:from-70% md:to-[#0d0e0d]/80"
       />
       <div aria-hidden className="absolute inset-0 hidden bg-linear-to-t from-black/55 from-0% via-transparent via-25% to-black/30 md:block" />
       <div aria-hidden className="absolute inset-3 hidden border border-gold/25 md:block" />
