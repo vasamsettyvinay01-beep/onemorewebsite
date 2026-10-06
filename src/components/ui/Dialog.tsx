@@ -17,6 +17,8 @@ interface DialogProps {
   children: ReactNode;
   /** `sheet` = bottom sheet on mobile, centred on desktop. `panel` = compact glass card. */
   variant?: "sheet" | "panel";
+  /** Sheet only: a wide two-column stage on desktop. */
+  wide?: boolean;
   className?: string;
   /** Extra classes applied to the backdrop (e.g. to tint it with an event theme). */
   backdropClassName?: string;
@@ -33,6 +35,7 @@ export function Dialog({
   hideTitle,
   children,
   variant = "sheet",
+  wide = false,
   className,
   backdropClassName,
   backdropStyle,
@@ -139,9 +142,12 @@ export function Dialog({
             className={cn(
               "relative w-full overflow-hidden outline-none",
               isSheet
-                ? "max-h-[92dvh] rounded-t-[6px] sm:max-w-[30rem] sm:rounded-[3px]"
+                ? cn(
+                    "max-h-[92dvh] rounded-t-[6px] sm:rounded-[3px]",
+                    wide ? "sm:max-w-[30rem] md:mx-6 md:max-w-[62rem]" : "sm:max-w-[30rem]",
+                  )
                 : "max-h-[85dvh] rounded-t-[6px] sm:max-w-[22rem] sm:rounded-[3px]",
-              "border border-ivory/10 bg-[rgba(13,14,13,0.97)] shadow-[0_-20px_80px_-20px_rgba(0,0,0,0.8)] sm:shadow-[0_40px_120px_-30px_rgba(0,0,0,0.9)]",
+              "border border-ivory/10 bg-[#0d0e0d] shadow-[0_-20px_80px_-20px_rgba(0,0,0,0.8)] sm:shadow-[0_40px_120px_-30px_rgba(0,0,0,0.9)]",
               className,
             )}
           >

@@ -97,6 +97,8 @@ export interface OneMoreEvent {
   shortDescription?: string;
   artwork: Artwork;
   mobileArtwork?: Artwork;
+  /** Text-free artwork for the ticket sheet's image column. Falls back to `artwork`. */
+  ticketArtwork?: Artwork;
   theme: EventTheme;
   /** ISO 8601 date (YYYY-MM-DD). Omit if not announced. */
   date?: string;

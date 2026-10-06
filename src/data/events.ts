@@ -49,6 +49,13 @@ export const events: OneMoreEvent[] = [
       height: 1414,
       focal: "50% 45%",
     },
+    ticketArtwork: {
+      src: "/events/diwali-night/ticket-panel.webp",
+      alt: "A garlanded magenta festival truck with friends holding sparklers, rolling down a lantern-lit wet street under Diwali fireworks",
+      width: 1400,
+      height: 1800,
+      focal: "50% 60%",
+    },
     theme: {
       primary: "#0B1430", // deep midnight blue
       secondary: "#7A1544", // magenta

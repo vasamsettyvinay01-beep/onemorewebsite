@@ -11,6 +11,7 @@ import { ComingSoonState } from "./states/ComingSoonState";
 import { CheckoutState } from "./states/CheckoutState";
 import { ConfirmationState } from "./states/ConfirmationState";
 import { SoldOutState } from "./states/SoldOutState";
+import { TicketArtwork } from "./TicketArtwork";
 
 interface TicketSheetProps {
   open: boolean;
@@ -61,6 +62,7 @@ export function TicketSheet({ open, event, onClose }: TicketSheetProps) {
       title={`${event.name} — tickets`}
       hideTitle
       variant="sheet"
+      wide
       backdropClassName="bg-rich/55"
       backdropStyle={{
         ...themeStyle,
@@ -68,7 +70,26 @@ export function TicketSheet({ open, event, onClose }: TicketSheetProps) {
           "radial-gradient(60% 50% at 50% 100%, color-mix(in srgb, var(--ev-primary) 70%, transparent), transparent)",
       }}
     >
-      <div style={themeStyle}>{content}</div>
+      <div
+        style={themeStyle}
+        className="max-h-[calc(92dvh-1rem)] overflow-y-auto md:grid md:max-h-none md:grid-cols-[1.05fr_1fr] md:overflow-visible"
+      >
+        <TicketArtwork event={event} />
+        <div className="relative flex flex-col md:justify-center">
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="absolute right-4 top-4 z-10 hidden size-10 items-center justify-center text-ivory/50 transition-colors duration-500 hover:text-ivory md:flex"
+          >
+            <span aria-hidden className="relative block size-4">
+              <span className="absolute left-0 top-1/2 h-px w-full rotate-45 bg-current" />
+              <span className="absolute left-0 top-1/2 h-px w-full -rotate-45 bg-current" />
+            </span>
+          </button>
+          {content}
+        </div>
+      </div>
     </Dialog>
   );
 }
