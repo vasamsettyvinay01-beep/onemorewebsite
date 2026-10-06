@@ -144,7 +144,7 @@ export function Dialog({
               isSheet
                 ? cn(
                     "max-h-[92dvh] rounded-t-[6px] sm:rounded-[3px]",
-                    wide ? "sm:max-w-[30rem] md:mx-6 md:max-w-[62rem]" : "sm:max-w-[30rem]",
+                    wide ? "sm:max-w-[30rem] md:mx-6 md:max-w-[56rem]" : "sm:max-w-[30rem]",
                   )
                 : "max-h-[85dvh] rounded-t-[6px] sm:max-w-[22rem] sm:rounded-[3px]",
               "border border-ivory/10 bg-[#0d0e0d] shadow-[0_-20px_80px_-20px_rgba(0,0,0,0.8)] sm:shadow-[0_40px_120px_-30px_rgba(0,0,0,0.9)]",
@@ -154,7 +154,7 @@ export function Dialog({
             {/* thin gold top edge */}
             <span aria-hidden className="hairline absolute inset-x-6 top-0" />
             <Grain opacity={0.07} />
-            {isSheet && (
+            {isSheet && !wide && (
               <span
                 aria-hidden
                 className="mx-auto mt-3 block h-1 w-10 rounded-full bg-ivory/25 sm:hidden"

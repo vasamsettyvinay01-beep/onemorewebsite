@@ -5,7 +5,7 @@ import { formatChapter, getEventFacts } from "@/lib/events";
 export function SheetHeader({ event, eyebrow }: { event: OneMoreEvent; eyebrow: string }) {
   const facts = getEventFacts(event);
   return (
-    <header aria-hidden className="px-6 pt-6 sm:px-8 sm:pt-8 md:px-10 md:pt-12">
+    <header aria-hidden className="px-6 pt-5 sm:px-8 md:px-10 md:pt-0">
       <p className="eyebrow flex items-center gap-3 text-(--ev-accent)">
         {event.chapter !== undefined && (
           <>
@@ -15,9 +15,9 @@ export function SheetHeader({ event, eyebrow }: { event: OneMoreEvent; eyebrow: 
         )}
         <span>{eyebrow}</span>
       </p>
-      <p className="font-display mt-4 text-[2.75rem] leading-[0.92] text-ivory sm:text-[3.25rem]">{event.name}</p>
+      <p className="font-display mt-3 text-[2.25rem] leading-[0.92] text-ivory md:text-[2.75rem]">{event.name}</p>
       {facts.length > 0 && (
-        <p className="mt-4 text-[0.7rem] uppercase tracking-[0.16em] text-ivory-muted">
+        <p className="mt-3 text-[0.7rem] uppercase tracking-[0.16em] text-ivory-muted">
           {facts.map((f) => f.value).join("  ·  ")}
         </p>
       )}

@@ -70,26 +70,27 @@ export function TicketSheet({ open, event, onClose }: TicketSheetProps) {
           "radial-gradient(60% 50% at 50% 100%, color-mix(in srgb, var(--ev-primary) 70%, transparent), transparent)",
       }}
     >
+      {/* sized to the viewport so the whole sheet is visible without scrolling */}
       <div
         style={themeStyle}
-        className="max-h-[calc(92dvh-1rem)] overflow-y-auto md:grid md:max-h-none md:grid-cols-[1.05fr_1fr] md:overflow-visible"
+        className="flex max-h-[92dvh] flex-col overflow-y-auto md:grid md:h-[min(37rem,calc(100dvh-3rem))] md:max-h-none md:grid-cols-2 md:overflow-hidden"
       >
         <TicketArtwork event={event} />
-        <div className="relative flex flex-col md:justify-center">
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            className="absolute right-4 top-4 z-10 hidden size-10 items-center justify-center text-ivory/50 transition-colors duration-500 hover:text-ivory md:flex"
-          >
-            <span aria-hidden className="relative block size-4">
-              <span className="absolute left-0 top-1/2 h-px w-full rotate-45 bg-current" />
-              <span className="absolute left-0 top-1/2 h-px w-full -rotate-45 bg-current" />
-            </span>
-          </button>
-          {content}
+        <div className="relative flex shrink-0 flex-col md:min-h-0 md:overflow-y-auto">
+          <div className="md:my-auto md:py-9">{content}</div>
         </div>
       </div>
+      <button
+        type="button"
+        onClick={onClose}
+        aria-label="Close"
+        className="absolute right-3 top-3 z-20 flex size-10 items-center justify-center rounded-full bg-black/45 text-ivory/80 backdrop-blur-sm transition-colors duration-500 hover:text-ivory md:right-4 md:top-4 md:bg-transparent md:text-ivory/50 md:backdrop-blur-none"
+      >
+        <span aria-hidden className="relative block size-4">
+          <span className="absolute left-0 top-1/2 h-px w-full rotate-45 bg-current" />
+          <span className="absolute left-0 top-1/2 h-px w-full -rotate-45 bg-current" />
+        </span>
+      </button>
     </Dialog>
   );
 }

@@ -14,7 +14,8 @@ export function TicketArtwork({ event }: { event: OneMoreEvent }) {
   const art = event.ticketArtwork ?? event.artwork;
 
   return (
-    <div className="relative h-72 overflow-hidden xs:h-80 md:h-auto md:min-h-[38rem]">
+    // on mobile the banner gives up height first so the panel below always fits
+    <div className="relative min-h-28 shrink basis-[clamp(9rem,32dvh,18rem)] overflow-hidden md:h-full">
       {art.src ? (
         <motion.div
           className="absolute inset-0"

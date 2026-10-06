@@ -106,6 +106,9 @@
   }
 }
 
+/* Short viewports (small phones, landscape, low laptops) */
+@custom-variant short (@media (max-height: 44rem));
+
 /* ------------------------------------------------------------------ */
 /* Base                                                                */
 /* ------------------------------------------------------------------ */
