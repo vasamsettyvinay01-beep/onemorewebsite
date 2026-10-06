@@ -88,7 +88,7 @@ export function Dialog({
     const t = window.setTimeout(() => {
       const first = panelRef.current?.querySelector<HTMLElement>("[data-autofocus]") ??
         panelRef.current?.querySelector<HTMLElement>(FOCUSABLE);
-      (first ?? panelRef.current)?.focus();
+      (first ?? panelRef.current)?.focus({ preventScroll: true });
     }, 40);
 
     return () => {

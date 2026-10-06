@@ -50,11 +50,11 @@ export const events: OneMoreEvent[] = [
       focal: "50% 45%",
     },
     ticketArtwork: {
-      src: "/events/diwali-night/ticket-panel.webp",
-      alt: "A garlanded magenta festival truck with friends holding sparklers, rolling down a lantern-lit wet street under Diwali fireworks",
+      src: "/events/diwali-night/ticket-caricature.webp",
+      alt: "Caricature of five friends in Diwali outfits teasing the viewer — one fans out golden tickets, another points smugly, one yawns, one checks her watch",
       width: 1400,
       height: 1800,
-      focal: "50% 60%",
+      focal: "50% 72%",
     },
     theme: {
       primary: "#0B1430", // deep midnight blue
