@@ -56,6 +56,13 @@ export const events: OneMoreEvent[] = [
       height: 1800,
       focal: "50% 72%",
     },
+    ticketArtworkMobile: {
+      src: "/events/diwali-night/ticket-caricature-square.webp",
+      alt: "Caricature of five friends in Diwali outfits teasing the viewer — one fans out golden tickets, another points smugly, one yawns, one checks her watch",
+      width: 1600,
+      height: 1600,
+      focal: "50% 22%",
+    },
     theme: {
       primary: "#0B1430", // deep midnight blue
       secondary: "#7A1544", // magenta

@@ -7,43 +7,44 @@ import { ease } from "@/lib/motion";
 import { BrandLogo } from "@/components/ui/BrandLogo";
 
 /**
- * The image half of the ticket sheet. On mobile the whole artwork is shown
- * uncropped, floated on a blurred copy of itself; on desktop it fills the
+ * The image half of the ticket sheet. On mobile a square cut of the artwork
+ * fills the banner edge to edge; on desktop the portrait artwork fills the
  * column with a slow push-in, shaded into the panel beside it.
  */
 export function TicketArtwork({ event }: { event: OneMoreEvent }) {
   const art = event.ticketArtwork ?? event.artwork;
+  const mobileArt = event.ticketArtworkMobile ?? art;
 
   return (
     // on mobile the artwork gives up height first so the panel below always fits
-    <div className="relative min-h-40 shrink basis-[48dvh] overflow-hidden md:h-full">
+    <div className="relative min-h-40 shrink basis-[48dvh] overflow-hidden max-md:max-h-[100vw] md:h-full">
       {art.src ? (
-        <>
-          <Image
-            src={art.src}
-            alt=""
-            aria-hidden
-            fill
-            sizes="100vw"
-            className="scale-125 object-cover opacity-55 blur-2xl md:hidden"
-          />
-          <motion.div
-            className="absolute inset-0"
-            initial={{ opacity: 0, scale: 1.06 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ duration: 1.6, ease: ease.cinematic }}
-          >
+        <motion.div
+          className="absolute inset-0"
+          initial={{ opacity: 0, scale: 1.06 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ duration: 1.6, ease: ease.cinematic }}
+        >
+          {mobileArt.src && (
             <Image
-              src={art.src}
-              alt={art.alt}
+              src={mobileArt.src}
+              alt={mobileArt.alt}
               fill
-              sizes="(min-width: 768px) 28rem, 100vw"
-              className="object-contain drop-shadow-[0_18px_30px_rgba(0,0,0,0.55)] md:object-cover md:drop-shadow-none"
-              style={{ objectPosition: art.focal ?? "50% 50%" }}
+              sizes="100vw"
+              className="object-cover md:hidden"
+              style={{ objectPosition: mobileArt.focal ?? "50% 50%" }}
               preload
             />
-          </motion.div>
-        </>
+          )}
+          <Image
+            src={art.src}
+            alt={art.alt}
+            fill
+            sizes="28rem"
+            className="hidden object-cover md:block"
+            style={{ objectPosition: art.focal ?? "50% 50%" }}
+          />
+        </motion.div>
       ) : (
         <div
           className="absolute inset-0"
@@ -54,13 +55,14 @@ export function TicketArtwork({ event }: { event: OneMoreEvent }) {
       {/* mobile: a soft fade into the panel; desktop: shade sideways into the panel */}
       <div
         aria-hidden
-        className="absolute inset-x-0 bottom-0 h-10 bg-linear-to-b from-transparent to-[#0d0e0d] md:inset-0 md:h-auto md:bg-linear-to-r md:from-transparent md:from-70% md:to-[#0d0e0d]/80"
+        className="absolute inset-x-0 bottom-0 h-16 bg-linear-to-b from-transparent to-[#0d0e0d] md:inset-0 md:h-auto md:bg-linear-to-r md:from-transparent md:from-70% md:to-[#0d0e0d]/80"
       />
+      <div aria-hidden className="absolute inset-x-0 top-0 h-20 bg-linear-to-b from-black/45 to-transparent md:hidden" />
       <div aria-hidden className="absolute inset-0 hidden bg-linear-to-t from-black/55 from-0% via-transparent via-25% to-black/30 md:block" />
       <div aria-hidden className="absolute inset-3 hidden border border-gold/25 md:block" />
 
-      <div className="absolute right-0 top-0 hidden p-8 md:block">
-        <span className="block w-10">
+      <div className="absolute left-0 top-0 p-4 md:left-auto md:right-0 md:p-8">
+        <span className="block w-8 md:w-10">
           <BrandLogo size="sm" decorative />
         </span>
       </div>
