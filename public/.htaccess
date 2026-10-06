@@ -1,0 +1,23 @@
+# Hostinger (Apache) config for the static export in /out.
+
+ErrorDocument 404 /404.html
+
+# Generated share images and app icon are exported without an extension.
+<FilesMatch "^(opengraph-image|twitter-image|apple-icon)$">
+  ForceType image/png
+</FilesMatch>
+
+<IfModule mod_deflate.c>
+  AddOutputFilterByType DEFLATE text/html text/plain text/css application/javascript application/json image/svg+xml
+</IfModule>
+
+<IfModule mod_headers.c>
+  # Hashed build assets never change; everything else revalidates.
+  SetEnvIf Request_URI "^/_next/static/" IMMUTABLE
+  Header set Cache-Control "public, max-age=31536000, immutable" env=IMMUTABLE
+  <FilesMatch "\.(html|txt)$">
+    Header set Cache-Control "public, max-age=0, must-revalidate"
+  </FilesMatch>
+  Header always set X-Content-Type-Options "nosniff"
+  Header always set Referrer-Policy "strict-origin-when-cross-origin"
+</IfModule>

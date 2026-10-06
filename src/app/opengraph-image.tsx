@@ -5,6 +5,7 @@ import { loadOgFonts, loadSealDataUri } from "@/lib/og";
 export const alt = `${brand.name} — ${brand.tagline}`;
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
+export const dynamic = "force-static";
 
 const gold = brand.colors.warmGold;
 const ivory = brand.colors.warmIvory;
