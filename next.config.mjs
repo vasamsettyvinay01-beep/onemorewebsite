@@ -8,6 +8,7 @@ const nextConfig = {
   images: {
     // The default optimiser needs a server; artwork is already shipped as sized webp.
     unoptimized: true,
+    qualities: [75, 90],
   },
 };
 

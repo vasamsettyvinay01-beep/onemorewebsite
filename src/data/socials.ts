@@ -5,15 +5,15 @@ import { brand } from "./brand";
  * Single source of truth for every community / social destination.
  * Components must import from here — never hardcode URLs.
  *
- * All three social URLs are PLACEHOLDERS until the real handles are supplied.
+ * Instagram and Facebook are PLACEHOLDERS until the real handles are supplied.
  */
 export const socials: SocialLink[] = [
   {
     id: "whatsapp",
     label: "WhatsApp",
     tagline: "Join the community",
-    href: "https://chat.whatsapp.com/REPLACE_WITH_INVITE_CODE",
-    placeholder: true,
+    href: "https://chat.whatsapp.com/G73AYmssB4DElgUK0EU6ja",
+    placeholder: false,
   },
   {
     id: "instagram",
