@@ -5,7 +5,7 @@ import { brand } from "./brand";
  * Single source of truth for every community / social destination.
  * Components must import from here — never hardcode URLs.
  *
- * Instagram and Facebook are PLACEHOLDERS until the real handles are supplied.
+ * Facebook is a PLACEHOLDER until the real page is supplied.
  */
 export const socials: SocialLink[] = [
   {
@@ -19,8 +19,8 @@ export const socials: SocialLink[] = [
     id: "instagram",
     label: "Instagram",
     tagline: "Follow the vibe",
-    href: "https://instagram.com/REPLACE_WITH_HANDLE",
-    placeholder: true,
+    href: "https://www.instagram.com/theonemore.company",
+    placeholder: false,
   },
   {
     id: "facebook",
