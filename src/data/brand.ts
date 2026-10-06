@@ -9,9 +9,8 @@ export const brand = {
   tagline: "The vibe just changed.",
   description:
     "The One More Company creates elevated cultural and social experiences built around people, music, energy and moments worth remembering.",
-  /** Placeholder until the real inbox is confirmed. */
-  email: "hello@theonemorecompany.com",
-  emailIsPlaceholder: true,
+  email: "contact@theonemorecompany.com",
+  emailIsPlaceholder: false,
   url: "https://theonemorecompany.com",
   foundedYear: 2026,
 
