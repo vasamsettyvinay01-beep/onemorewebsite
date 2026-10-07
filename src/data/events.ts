@@ -93,7 +93,7 @@ export const events: OneMoreEvent[] = [
       { id: "early-bird", name: "Early Bird", priceCents: 1500, currency: "USD" },
       { id: "general", name: "General Admission", priceCents: 2000, currency: "USD" },
       { id: "couple", name: "Couple", priceCents: 3000, currency: "USD", admits: 2 },
-      { id: "group", name: "Group of 5", priceCents: 6000, currency: "USD", admits: 5 },
+      { id: "group", name: "Group of 4", priceCents: 6000, currency: "USD", admits: 4 },
       { id: "vip", name: "VIP", priceCents: 0, currency: "USD", priceOnRequest: true },
     ],
   },
