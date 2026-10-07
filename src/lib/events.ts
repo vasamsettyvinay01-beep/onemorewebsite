@@ -103,12 +103,3 @@ export function getEventFacts(event: OneMoreEvent): EventFact[] {
   if (event.minimumAge) facts.push({ label: "AGE", value: `${event.minimumAge}+` });
   return facts;
 }
-
-/** "FROM $15" once prices are announced — even before sales open. */
-export function getPriceLabel(event: OneMoreEvent): string | undefined {
-  if (event.status === "sold-out" || event.status === "past") return undefined;
-  const tier = getStartingTier(event);
-  if (!tier) return undefined;
-  const price = formatMoney(tier.priceCents, tier.currency);
-  return getVisibleTiers(event).length > 1 ? `FROM ${price}` : price;
-}
