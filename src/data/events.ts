@@ -42,26 +42,27 @@ export const events: OneMoreEvent[] = [
     chapter: 1,
     eyebrow: "NEXT UP",
     artwork: {
-      // Other approved Diwali artwork in /public/events/diwali-night/: punk.webp, painterly.webp, coming-soon.webp.
-      src: "/events/diwali-night/premium-night.webp",
-      alt: "Diwali Night — coming soon. A garlanded truck of friends with speakers under fireworks on a lantern-lit street",
-      width: 1100,
-      height: 1414,
-      focal: "50% 45%",
-    },
-    ticketArtwork: {
-      src: "/events/diwali-night/ticket-caricature.webp",
-      alt: "Caricature of five friends in Diwali outfits teasing the viewer — one fans out golden tickets, another points smugly, one yawns, one checks her watch",
-      width: 1400,
-      height: 1800,
-      focal: "50% 72%",
-    },
-    ticketArtworkMobile: {
-      src: "/events/diwali-night/ticket-caricature-square.webp",
-      alt: "Caricature of five friends in Diwali outfits teasing the viewer — one fans out golden tickets, another points smugly, one yawns, one checks her watch",
+      // Other approved Diwali artwork in /public/events/diwali-night/: premium-night.webp, punk.webp, painterly.webp, coming-soon.webp.
+      src: "/events/diwali-night/dj-crowd-night.webp",
+      alt: "A packed nightclub crowd with hands in the air facing the DJ on a glowing stage, lasers, gold confetti and cold-spark fountains overhead",
       width: 1600,
       height: 1600,
-      focal: "50% 22%",
+      focal: "50% 50%",
+    },
+    // Raw Recraft original: /assets/artwork-originals/diwali-ticket-comedy-icons.recraft.webp
+    ticketArtwork: {
+      src: "/events/diwali-night/ticket-comedy-icons.webp",
+      alt: "Editorial caricature of four Indian comedy legends crashing a Diwali night in Houston — one shocked with gold tickets, one suspicious, one laughing, one dancing with a sparkler",
+      width: 1400,
+      height: 1900,
+      focal: "50% 40%",
+    },
+    ticketArtworkMobile: {
+      src: "/events/diwali-night/ticket-comedy-icons-square.webp",
+      alt: "Editorial caricature of four Indian comedy legends crashing a Diwali night in Houston — one shocked with gold tickets, one suspicious, one laughing, one dancing with a sparkler",
+      width: 1600,
+      height: 1600,
+      focal: "50% 52%",
     },
     theme: {
       primary: "#0B1430", // deep midnight blue
