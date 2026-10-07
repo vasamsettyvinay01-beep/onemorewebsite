@@ -14,11 +14,20 @@ export function getEventBySlug(slug: string): OneMoreEvent | undefined {
 }
 
 export function isOnSale(event: OneMoreEvent): boolean {
-  return event.status === "on-sale" && event.ticketTiers.length > 0;
+  return event.status === "on-sale" && getPurchasableTiers(event).length > 0;
+}
+
+/** Tiers that can be bought at a fixed price (excludes "price on request" tiers like VIP). */
+export function getPurchasableTiers(event: OneMoreEvent): TicketTier[] {
+  return event.ticketTiers.filter((t) => !t.priceOnRequest);
 }
 
 export function getStartingTier(event: OneMoreEvent): TicketTier | undefined {
-  return [...event.ticketTiers].sort((a, b) => a.priceCents - b.priceCents)[0];
+  return [...getPurchasableTiers(event)].sort((a, b) => a.priceCents - b.priceCents)[0];
+}
+
+export function formatTierPrice(tier: TicketTier): string {
+  return tier.priceOnRequest ? "On request" : formatMoney(tier.priceCents, tier.currency);
 }
 
 export function formatMoney(cents: number, currency: string, locale = "en-US"): string {
@@ -86,8 +95,9 @@ export function getEventFacts(event: OneMoreEvent): EventFact[] {
   return facts;
 }
 
+/** "FROM $15" once prices are announced — even before sales open. */
 export function getPriceLabel(event: OneMoreEvent): string | undefined {
-  if (!isOnSale(event)) return undefined;
+  if (event.status === "sold-out" || event.status === "past") return undefined;
   const tier = getStartingTier(event);
   if (!tier) return undefined;
   const price = formatMoney(tier.priceCents, tier.currency);

@@ -17,7 +17,7 @@ export function SheetHeader({ event, eyebrow }: { event: OneMoreEvent; eyebrow: 
       </p>
       <p className="font-display mt-3 text-[2.25rem] leading-[0.92] text-ivory md:text-[2.75rem]">{event.name}</p>
       {facts.length > 0 && (
-        <p className="mt-3 text-[0.7rem] uppercase tracking-[0.16em] text-ivory-muted">
+        <p className="mt-3 text-[0.66rem] uppercase tracking-[0.1em] text-ivory-muted sm:text-[0.7rem] sm:tracking-[0.16em]">
           {facts.map((f) => f.value).join("  ·  ")}
         </p>
       )}

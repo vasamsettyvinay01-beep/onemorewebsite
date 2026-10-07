@@ -77,7 +77,7 @@ export function TicketSheet({ open, event, onClose }: TicketSheetProps) {
       >
         <TicketArtwork event={event} />
         <div className="relative flex shrink-0 flex-col md:min-h-0 md:overflow-y-auto">
-          <div className="md:my-auto md:py-9">{content}</div>
+          <div className="md:my-auto md:py-7">{content}</div>
         </div>
       </div>
       <button

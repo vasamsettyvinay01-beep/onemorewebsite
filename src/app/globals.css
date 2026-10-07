@@ -108,6 +108,7 @@
 
 /* Short viewports (small phones, landscape, low laptops) */
 @custom-variant short (@media (max-height: 44rem));
+@custom-variant compact (@media (max-height: 50rem));
 
 /* ------------------------------------------------------------------ */
 /* Base                                                                */

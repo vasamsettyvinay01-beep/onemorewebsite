@@ -65,6 +65,10 @@ export interface TicketTier {
   /** Price in the smallest currency unit (cents). */
   priceCents: number;
   currency: string;
+  /** Price isn't fixed (e.g. VIP tables) — shown as "On request" and never sold through checkout. */
+  priceOnRequest?: boolean;
+  /** People admitted by one ticket of this tier (couple = 2, group = 5). Defaults to 1. */
+  admits?: number;
   description?: string;
   /** Inventory for this tier. Undefined = unlimited / not yet set. */
   capacity?: number;

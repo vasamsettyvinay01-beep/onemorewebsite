@@ -4,7 +4,7 @@ import { useMemo, useState, type FormEvent } from "react";
 import type { OneMoreEvent, TicketTier } from "@/types/event";
 import type { CheckoutProvider, OrderConfirmation, PaymentMethod } from "@/types/ticketing";
 import { calculateTotalCents } from "@/lib/checkout";
-import { formatEventDate, formatEventPlace, formatMoney, getStartingTier } from "@/lib/events";
+import { formatEventDate, formatEventPlace, formatMoney, getPurchasableTiers, getStartingTier } from "@/lib/events";
 import { Button } from "@/components/ui/Button";
 import { SheetHeader } from "./SheetHeader";
 
@@ -23,7 +23,7 @@ interface Props {
  * orchestrate.
  */
 export function CheckoutState({ event, provider, onClose, onConfirmed }: Props) {
-  const tiers = event.ticketTiers;
+  const tiers = getPurchasableTiers(event);
   const [tier, setTier] = useState<TicketTier>(getStartingTier(event) ?? tiers[0]);
   const [quantity, setQuantity] = useState(1);
   const [name, setName] = useState("");
