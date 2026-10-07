@@ -75,6 +75,9 @@ export const events: OneMoreEvent[] = [
       lights: ["#F2B134", "#C2272D", "#E8632B", "#B0205C"],
     },
     date: "2026-11-07",
+    startTime: "21:00",
+    endTime: "02:00",
+    minimumAge: 21,
     timezone: "America/Chicago",
     venue: {
       name: "The Nichols Venue",
@@ -85,7 +88,7 @@ export const events: OneMoreEvent[] = [
       mapUrl: "https://www.google.com/maps/search/?api=1&query=The+Nichols+Venue+2515+Morse+St+Houston+TX+77019",
     },
     city: "Houston",
-    // startTime, endTime, minimumAge, saleStart, saleEnd: not finalised yet.
+    // saleStart, saleEnd and the early-bird window: not finalised yet.
     ticketTiers: [
       { id: "early-bird", name: "Early Bird", priceCents: 1500, currency: "USD" },
       { id: "general", name: "General Admission", priceCents: 2000, currency: "USD" },

@@ -2,8 +2,17 @@ import type { OneMoreEvent } from "@/types/event";
 import { formatChapter, getEventFacts } from "@/lib/events";
 
 /** Shared top block of the ticket sheet: chapter, event name + any known facts. */
-export function SheetHeader({ event, eyebrow }: { event: OneMoreEvent; eyebrow: string }) {
-  const facts = getEventFacts(event);
+export function SheetHeader({
+  event,
+  eyebrow,
+  omitPlace = false,
+}: {
+  event: OneMoreEvent;
+  eyebrow: string;
+  /** Leave the venue out when the caller shows it on its own line. */
+  omitPlace?: boolean;
+}) {
+  const facts = getEventFacts(event).filter((f) => !(omitPlace && f.label === "WHERE"));
   return (
     <header aria-hidden className="px-6 pt-5 sm:px-8 md:px-10 md:pt-0">
       <p className="eyebrow flex items-center gap-3 text-(--ev-accent)">

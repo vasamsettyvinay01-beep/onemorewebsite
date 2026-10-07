@@ -4,8 +4,6 @@ import { brand } from "./brand";
 /**
  * Single source of truth for every community / social destination.
  * Components must import from here — never hardcode URLs.
- *
- * Facebook is a PLACEHOLDER until the real page is supplied.
  */
 export const socials: SocialLink[] = [
   {
@@ -26,8 +24,8 @@ export const socials: SocialLink[] = [
     id: "facebook",
     label: "Facebook",
     tagline: "Stay connected",
-    href: "https://facebook.com/REPLACE_WITH_PAGE",
-    placeholder: true,
+    href: "https://www.facebook.com/share/1FE7aEBDeM/",
+    placeholder: false,
   },
   {
     id: "email",

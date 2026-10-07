@@ -25,15 +25,15 @@ export function ComingSoonState({ event }: Props) {
 
   return (
     <div className="flex flex-col">
-      <SheetHeader event={event} eyebrow="Tickets" />
+      <SheetHeader event={event} eyebrow="Tickets" omitPlace={!!venue?.address} />
       {venue?.address && (
         <a
           href={venue.mapUrl ?? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(venue.address)}`}
           target="_blank"
           rel="noopener noreferrer"
-          className="mx-6 mt-1.5 inline-flex w-fit items-center gap-1.5 text-[0.7rem] tracking-[0.04em] text-ivory/55 underline decoration-ivory/20 underline-offset-4 transition-colors duration-500 hover:text-ivory hover:decoration-(--ev-accent) sm:mx-8 md:mx-10"
+          className="mx-6 mt-1.5 block w-fit text-[0.7rem] leading-relaxed tracking-[0.04em] text-ivory/55 underline decoration-ivory/20 underline-offset-4 transition-colors duration-500 hover:text-ivory hover:decoration-(--ev-accent) sm:mx-8 md:mx-10"
         >
-          {venue.address}
+          <span className="text-ivory/80">{venue.name}</span> · {venue.address}{" "}
           <span aria-hidden>↗</span>
         </a>
       )}
