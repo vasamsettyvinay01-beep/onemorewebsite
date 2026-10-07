@@ -88,12 +88,19 @@ export const events: OneMoreEvent[] = [
       mapUrl: "https://www.google.com/maps/search/?api=1&query=The+Nichols+Venue+2515+Morse+St+Houston+TX+77019",
     },
     city: "Houston",
-    // saleStart, saleEnd and the early-bird window: not finalised yet.
+    // saleStart, saleEnd: not finalised yet.
     ticketTiers: [
-      { id: "early-bird", name: "Early Bird", priceCents: 1500, currency: "USD" },
+      { id: "early-bird", name: "Early Bird", priceCents: 1500, currency: "USD", capacity: 50 },
       { id: "general", name: "General Admission", priceCents: 2000, currency: "USD" },
       { id: "couple", name: "Couple", priceCents: 3000, currency: "USD", admits: 2 },
-      { id: "group", name: "Group of 4", priceCents: 6000, currency: "USD", admits: 4 },
+      {
+        id: "group",
+        name: "Group of 5",
+        priceCents: 6000,
+        currency: "USD",
+        admits: 5,
+        opensAfter: "early-bird",
+      },
       { id: "vip", name: "VIP", priceCents: 0, currency: "USD", priceOnRequest: true },
     ],
   },

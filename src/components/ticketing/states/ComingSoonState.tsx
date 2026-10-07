@@ -1,6 +1,6 @@
 "use client";
 
-import type { OneMoreEvent } from "@/types/event";
+import type { OneMoreEvent, TicketTier } from "@/types/event";
 import { brand } from "@/data/brand";
 import { getSocial } from "@/data/socials";
 import { formatTierPrice } from "@/lib/events";
@@ -12,6 +12,18 @@ import { SheetHeader } from "./SheetHeader";
 interface Props {
   event: OneMoreEvent;
   onClose: () => void;
+}
+
+function tierNotes(tier: TicketTier, tiers: TicketTier[]): string[] {
+  const notes: string[] = [];
+  if (tier.capacity !== undefined) notes.push(`First ${tier.capacity} tickets`);
+  if ((tier.admits ?? 1) > 1) notes.push(`Admits ${tier.admits}`);
+  if (tier.opensAfter) {
+    const after = tiers.find((t) => t.id === tier.opensAfter);
+    if (after) notes.push(`After ${after.name.toLowerCase()}`);
+  }
+  if (tier.priceOnRequest) notes.push("Ask us on WhatsApp");
+  return notes;
 }
 
 /** Shown while ticket sales are not open / not connected. Closing is the sheet's × button. */
@@ -61,7 +73,7 @@ export function ComingSoonState({ event }: Props) {
               <li
                 key={t.id}
                 className={cn(
-                  "flex items-baseline justify-between gap-3 bg-[#0d0e0d] px-3.5 py-2",
+                  "flex items-baseline justify-between gap-3 bg-[#0d0e0d] px-3.5 py-1.5",
                   t.priceOnRequest && tiers.length % 2 === 1 && i === tiers.length - 1 && "col-span-2",
                 )}
               >
@@ -74,12 +86,11 @@ export function ComingSoonState({ event }: Props) {
                   >
                     {t.name}
                   </span>
-                  {(t.admits ?? 1) > 1 && (
-                    <span className="mt-0.5 block text-[0.62rem] text-ivory/40">Admits {t.admits}</span>
-                  )}
-                  {t.priceOnRequest && (
-                    <span className="mt-0.5 block text-[0.62rem] text-ivory/40">Ask us on WhatsApp</span>
-                  )}
+                  {tierNotes(t, tiers).map((note) => (
+                    <span key={note} className="mt-0.5 block text-[0.62rem] leading-tight text-ivory/40">
+                      {note}
+                    </span>
+                  ))}
                 </span>
                 <span
                   className={cn(

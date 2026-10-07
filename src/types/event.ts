@@ -69,6 +69,8 @@ export interface TicketTier {
   priceOnRequest?: boolean;
   /** People admitted by one ticket of this tier (couple = 2, group = 5). Defaults to 1. */
   admits?: number;
+  /** Id of a tier that must sell out first (e.g. group tickets open after early bird). */
+  opensAfter?: string;
   description?: string;
   /** Inventory for this tier. Undefined = unlimited / not yet set. */
   capacity?: number;
