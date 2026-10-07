@@ -3,7 +3,7 @@
 import type { OneMoreEvent, TicketTier } from "@/types/event";
 import { brand } from "@/data/brand";
 import { getSocial } from "@/data/socials";
-import { formatTierPrice } from "@/lib/events";
+import { formatTierPrice, getVisibleTiers } from "@/lib/events";
 import { cn } from "@/lib/cn";
 import { Button } from "@/components/ui/Button";
 import { SocialGlyph } from "@/components/community/SocialGlyph";
@@ -14,16 +14,11 @@ interface Props {
   onClose: () => void;
 }
 
-function tierNotes(tier: TicketTier, tiers: TicketTier[]): string[] {
-  const notes: string[] = [];
-  if (tier.capacity !== undefined) notes.push(`First ${tier.capacity} tickets`);
-  if ((tier.admits ?? 1) > 1) notes.push(`Admits ${tier.admits}`);
-  if (tier.opensAfter) {
-    const after = tiers.find((t) => t.id === tier.opensAfter);
-    if (after) notes.push(`After ${after.name.toLowerCase()}`);
-  }
-  if (tier.priceOnRequest) notes.push("Ask us on WhatsApp");
-  return notes;
+function tierNote(tier: TicketTier): string | undefined {
+  if (tier.soldOut) return "Sold out";
+  if (tier.capacity !== undefined) return `First ${tier.capacity} tickets`;
+  if ((tier.admits ?? 1) > 1) return `Admits ${tier.admits}`;
+  if (tier.priceOnRequest) return "Ask us on WhatsApp";
 }
 
 /** Shown while ticket sales are not open / not connected. Closing is the sheet's × button. */
@@ -32,7 +27,8 @@ export function ComingSoonState({ event }: Props) {
   const instagram = getSocial("instagram");
   const comingSoon = brand.copy.comingSoon.charAt(0) + brand.copy.comingSoon.slice(1).toLowerCase();
 
-  const tiers = event.ticketTiers;
+  const tiers = getVisibleTiers(event);
+  const highlightId = tiers.find((t) => !t.soldOut)?.id;
   const venue = event.venue;
 
   return (
@@ -69,39 +65,48 @@ export function ComingSoonState({ event }: Props) {
 
         {tiers.length > 0 ? (
           <ul className="mt-3 grid grid-cols-2 gap-px overflow-hidden border border-ivory/10 bg-ivory/10">
-            {tiers.map((t, i) => (
-              <li
-                key={t.id}
-                className={cn(
-                  "flex items-baseline justify-between gap-3 bg-[#0d0e0d] px-3.5 py-1.5",
-                  t.priceOnRequest && tiers.length % 2 === 1 && i === tiers.length - 1 && "col-span-2",
-                )}
-              >
-                <span className="min-w-0">
-                  <span
-                    className={cn(
-                      "eyebrow block text-[0.54rem] tracking-[0.2em]",
-                      i === 0 ? "text-(--ev-accent)" : "text-ivory/60",
-                    )}
-                  >
-                    {t.name}
-                  </span>
-                  {tierNotes(t, tiers).map((note) => (
-                    <span key={note} className="mt-0.5 block text-[0.62rem] leading-tight text-ivory/40">
-                      {note}
-                    </span>
-                  ))}
-                </span>
-                <span
+            {tiers.map((t, i) => {
+              const note = tierNote(t);
+              return (
+                <li
+                  key={t.id}
                   className={cn(
-                    "font-display shrink-0 leading-none text-ivory",
-                    t.priceOnRequest ? "text-base italic text-ivory/80" : "text-[1.45rem]",
+                    "flex items-baseline justify-between gap-3 bg-[#0d0e0d] px-3.5 py-1.5",
+                    tiers.length % 2 === 1 && i === tiers.length - 1 && "col-span-2",
                   )}
                 >
-                  {formatTierPrice(t)}
-                </span>
-              </li>
-            ))}
+                  <span className="min-w-0">
+                    <span
+                      className={cn(
+                        "eyebrow block text-[0.54rem] tracking-[0.2em]",
+                        t.soldOut ? "text-ivory/35" : t.id === highlightId ? "text-(--ev-accent)" : "text-ivory/60",
+                      )}
+                    >
+                      {t.name}
+                    </span>
+                    {note && (
+                      <span
+                        className={cn(
+                          "mt-0.5 block text-[0.62rem] leading-tight",
+                          t.soldOut ? "font-semibold uppercase tracking-[0.18em] text-(--ev-accent)" : "text-ivory/40",
+                        )}
+                      >
+                        {note}
+                      </span>
+                    )}
+                  </span>
+                  <span
+                    className={cn(
+                      "font-display shrink-0 leading-none",
+                      t.soldOut ? "text-ivory/30 line-through decoration-1" : "text-ivory",
+                      t.priceOnRequest ? "text-base italic text-ivory/80" : "text-[1.45rem]",
+                    )}
+                  >
+                    {formatTierPrice(t)}
+                  </span>
+                </li>
+              );
+            })}
           </ul>
         ) : (
           <p className="mt-3 max-w-[32ch] text-[0.82rem] leading-relaxed text-ivory-muted">

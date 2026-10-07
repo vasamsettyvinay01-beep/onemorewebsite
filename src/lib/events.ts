@@ -17,9 +17,18 @@ export function isOnSale(event: OneMoreEvent): boolean {
   return event.status === "on-sale" && getPurchasableTiers(event).length > 0;
 }
 
-/** Tiers that can be bought at a fixed price (excludes "price on request" tiers like VIP). */
+/** Tiers shown publicly: not hidden, and any tier they wait on has sold out. */
+export function getVisibleTiers(event: OneMoreEvent): TicketTier[] {
+  return event.ticketTiers.filter((t) => {
+    if (t.hidden) return false;
+    if (!t.opensAfter) return true;
+    return event.ticketTiers.find((o) => o.id === t.opensAfter)?.soldOut ?? true;
+  });
+}
+
+/** Tiers that can be bought right now at a fixed price. */
 export function getPurchasableTiers(event: OneMoreEvent): TicketTier[] {
-  return event.ticketTiers.filter((t) => !t.priceOnRequest);
+  return getVisibleTiers(event).filter((t) => !t.priceOnRequest && !t.soldOut);
 }
 
 export function getStartingTier(event: OneMoreEvent): TicketTier | undefined {
@@ -101,5 +110,5 @@ export function getPriceLabel(event: OneMoreEvent): string | undefined {
   const tier = getStartingTier(event);
   if (!tier) return undefined;
   const price = formatMoney(tier.priceCents, tier.currency);
-  return event.ticketTiers.length > 1 ? `FROM ${price}` : price;
+  return getVisibleTiers(event).length > 1 ? `FROM ${price}` : price;
 }

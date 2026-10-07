@@ -90,7 +90,8 @@ export const events: OneMoreEvent[] = [
     city: "Houston",
     // saleStart, saleEnd: not finalised yet.
     ticketTiers: [
-      { id: "early-bird", name: "Early Bird", priceCents: 1500, currency: "USD", capacity: 50 },
+      // Set soldOut: true once all 50 are gone — that also reveals the Group of 5 tier.
+      { id: "early-bird", name: "Early Bird", priceCents: 1500, currency: "USD", capacity: 50, soldOut: false },
       { id: "general", name: "General Admission", priceCents: 2000, currency: "USD" },
       { id: "couple", name: "Couple", priceCents: 3000, currency: "USD", admits: 2 },
       {
@@ -101,7 +102,7 @@ export const events: OneMoreEvent[] = [
         admits: 5,
         opensAfter: "early-bird",
       },
-      { id: "vip", name: "VIP", priceCents: 0, currency: "USD", priceOnRequest: true },
+      { id: "vip", name: "VIP", priceCents: 0, currency: "USD", priceOnRequest: true, hidden: true },
     ],
   },
 ];
