@@ -37,7 +37,7 @@ export const events: OneMoreEvent[] = [
     id: "evt_diwali_night",
     slug: "diwali-night",
     name: "Diwali Night",
-    status: "coming-soon",
+    status: "on-sale", // LOCAL TEST ONLY — revert to "coming-soon" before deploying
     featured: true,
     chapter: 1,
     eyebrow: "NEXT UP",
@@ -90,11 +90,34 @@ export const events: OneMoreEvent[] = [
     },
     city: "Houston",
     // saleStart, saleEnd: not finalised yet.
+    // Selling: run `npm run stripe:setup`, paste each printed link as `paymentLink` on its tier,
+    // then set status: "on-sale". Until every buyable tier has a link the sheet stays on COMING SOON.
     ticketTiers: [
       // Set soldOut: true once all 50 are gone — that also reveals the Group of 5 tier.
-      { id: "early-bird", name: "Early Bird", priceCents: 1500, currency: "USD", capacity: 50, soldOut: false },
-      { id: "general", name: "General Admission", priceCents: 2000, currency: "USD" },
-      { id: "couple", name: "Couple", priceCents: 3000, currency: "USD", admits: 2 },
+      {
+        id: "early-bird",
+        name: "Early Bird",
+        priceCents: 1500,
+        currency: "USD",
+        capacity: 50,
+        soldOut: false,
+        paymentLink: "https://buy.stripe.com/test_4gMdR9cb239C3JA9a0enS00",
+      },
+      {
+        id: "general",
+        name: "General Admission",
+        priceCents: 2000,
+        currency: "USD",
+        paymentLink: "https://buy.stripe.com/test_fZu7sL5ME8tWbc20DuenS01",
+      },
+      {
+        id: "couple",
+        name: "Couple",
+        priceCents: 3000,
+        currency: "USD",
+        admits: 2,
+        paymentLink: "https://buy.stripe.com/test_4gM3cvgridOgcg64TKenS02",
+      },
       {
         id: "group",
         name: "Group of 5",
@@ -102,6 +125,7 @@ export const events: OneMoreEvent[] = [
         currency: "USD",
         admits: 5,
         opensAfter: "early-bird",
+        paymentLink: "https://buy.stripe.com/test_cNieVda2UeSkdka3PGenS03",
       },
       { id: "vip", name: "VIP", priceCents: 0, currency: "USD", priceOnRequest: true, hidden: true },
     ],

@@ -1,0 +1,13 @@
+project_id = "onemore-tickets"
+
+# Each function checks its own auth: Stripe signs the webhook, the ticket page
+# uses an unguessable link, and /door verifies the staff session itself.
+
+[functions.stripe-webhook]
+verify_jwt = false
+
+[functions.ticket-view]
+verify_jwt = false
+
+[functions.door]
+verify_jwt = false

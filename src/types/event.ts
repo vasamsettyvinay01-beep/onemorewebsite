@@ -80,6 +80,8 @@ export interface TicketTier {
   capacity?: number;
   /** Max tickets per order for this tier. */
   maxPerOrder?: number;
+  /** Stripe Payment Link (https://buy.stripe.com/...) that sells this tier. */
+  paymentLink?: string;
   saleStart?: string;
   saleEnd?: string;
 }

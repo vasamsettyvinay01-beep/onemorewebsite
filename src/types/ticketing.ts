@@ -92,7 +92,8 @@ export type ScanResult =
 export interface CheckoutIntent {
   eventId: OneMoreEvent["id"];
   lines: OrderLine[];
-  purchaser: Purchaser;
+  /** Omitted when the provider's hosted page collects it. */
+  purchaser?: Purchaser;
   promoCode?: string;
 }
 
@@ -111,6 +112,8 @@ export interface CheckoutProvider {
   readonly mode: CheckoutMode;
   readonly supportsApplePay: boolean;
   readonly supportsGooglePay: boolean;
+  /** Quantity, name and email are collected on the provider's hosted page, not in the sheet. */
+  readonly collectsPurchaserDetails: boolean;
   createCheckout(intent: CheckoutIntent): Promise<CheckoutResult>;
 }
 

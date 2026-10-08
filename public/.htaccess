@@ -2,6 +2,14 @@
 
 ErrorDocument 404 /404.html
 
+# Pages export as /tickets.html etc.; serve them at /tickets and /tickets/ (query string kept).
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteCond %{REQUEST_URI} ^/(.+?)/?$
+  RewriteCond %{DOCUMENT_ROOT}/%1.html -f
+  RewriteRule ^(.+?)/?$ /$1.html [L]
+</IfModule>
+
 # Generated share images and app icon are exported without an extension.
 <FilesMatch "^(opengraph-image|twitter-image|apple-icon)$">
   ForceType image/png

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import type { OneMoreEvent, TicketTier } from "@/types/event";
 import type { CheckoutProvider, OrderConfirmation, PaymentMethod } from "@/types/ticketing";
 import { calculateTotalCents } from "@/lib/checkout";
@@ -17,6 +17,8 @@ interface Props {
 
 /**
  * The fast-checkout UI: tier → quantity → name → email → pay.
+ * With a hosted provider (Stripe Payment Links) it is just tier → continue,
+ * and Stripe collects the rest.
  * Only rendered when a live CheckoutProvider is configured. It never
  * generates tickets itself; confirmation must come from the server after a
  * verified payment (webhook), which `provider.createCheckout` is expected to
@@ -31,6 +33,13 @@ export function CheckoutState({ event, provider, onClose, onConfirmed }: Props) 
   const [submitting, setSubmitting] = useState<PaymentMethod | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Back from a hosted payment page can restore this page from bfcache mid-"Processing…".
+  useEffect(() => {
+    const reset = (e: PageTransitionEvent) => e.persisted && setSubmitting(null);
+    window.addEventListener("pageshow", reset);
+    return () => window.removeEventListener("pageshow", reset);
+  }, []);
+
   const maxQty = tier.maxPerOrder ?? 8;
   const lines = useMemo(
     () => [{ tierId: tier.id, quantity, unitPriceCents: tier.priceCents }],
@@ -38,7 +47,8 @@ export function CheckoutState({ event, provider, onClose, onConfirmed }: Props) 
   );
   const total = calculateTotalCents(lines);
   const totalLabel = formatMoney(total, tier.currency);
-  const valid = name.trim().length > 1 && /.+@.+\..+/.test(email);
+  const hosted = provider.collectsPurchaserDetails;
+  const valid = hosted || (name.trim().length > 1 && /.+@.+\..+/.test(email));
 
   async function pay(method: PaymentMethod, e?: FormEvent) {
     e?.preventDefault();
@@ -48,17 +58,19 @@ export function CheckoutState({ event, provider, onClose, onConfirmed }: Props) 
     const result = await provider.createCheckout({
       eventId: event.id,
       lines,
-      purchaser: { name: name.trim(), email: email.trim() },
+      purchaser: hosted ? undefined : { name: name.trim(), email: email.trim() },
     });
-    setSubmitting(null);
     if (!result.ok) {
+      setSubmitting(null);
       setError(result.error);
       return;
     }
     if (result.redirectUrl) {
+      // Stay in "Processing…" while the browser leaves for the hosted page.
       window.location.assign(result.redirectUrl);
       return;
     }
+    setSubmitting(null);
     // A live provider will resolve this only after server-side verification.
     onConfirmed({
       orderId: result.orderId,
@@ -109,63 +121,73 @@ export function CheckoutState({ event, provider, onClose, onConfirmed }: Props) 
         )}
 
         {/* Quantity */}
-        <div className="mt-6 flex items-center justify-between">
-          <span className="eyebrow text-ivory-muted">Quantity</span>
-          <div className="flex items-center gap-6">
-            <button
-              type="button"
-              aria-label="Decrease quantity"
-              onClick={() => setQuantity((q) => Math.max(1, q - 1))}
-              className="flex size-11 items-center justify-center rounded-full border border-ivory/20 text-xl text-ivory transition-colors hover:border-(--ev-accent)"
-            >
-              −
-            </button>
-            <span aria-live="polite" className="w-6 text-center font-display text-3xl">
-              {quantity}
-            </span>
-            <button
-              type="button"
-              aria-label="Increase quantity"
-              onClick={() => setQuantity((q) => Math.min(maxQty, q + 1))}
-              className="flex size-11 items-center justify-center rounded-full border border-ivory/20 text-xl text-ivory transition-colors hover:border-(--ev-accent)"
-            >
-              +
-            </button>
+        {!hosted && (
+          <div className="mt-6 flex items-center justify-between">
+            <span className="eyebrow text-ivory-muted">Quantity</span>
+            <div className="flex items-center gap-6">
+              <button
+                type="button"
+                aria-label="Decrease quantity"
+                onClick={() => setQuantity((q) => Math.max(1, q - 1))}
+                className="flex size-11 items-center justify-center rounded-full border border-ivory/20 text-xl text-ivory transition-colors hover:border-(--ev-accent)"
+              >
+                −
+              </button>
+              <span aria-live="polite" className="w-6 text-center font-display text-3xl">
+                {quantity}
+              </span>
+              <button
+                type="button"
+                aria-label="Increase quantity"
+                onClick={() => setQuantity((q) => Math.min(maxQty, q + 1))}
+                className="flex size-11 items-center justify-center rounded-full border border-ivory/20 text-xl text-ivory transition-colors hover:border-(--ev-accent)"
+              >
+                +
+              </button>
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
       {/* Purchaser */}
-      <div className="flex flex-col gap-5 px-6 pt-6 sm:px-8">
-        <label className="block">
-          <span className="eyebrow text-ivory-muted">Name</span>
-          <input
-            data-autofocus=""
-            className={field}
-            autoComplete="name"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            required
-          />
-        </label>
-        <label className="block">
-          <span className="eyebrow text-ivory-muted">Email</span>
-          <input
-            className={field}
-            type="email"
-            inputMode="email"
-            autoComplete="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-          />
-        </label>
-        {error && (
-          <p role="alert" className="text-sm text-(--ev-accent)">
-            {error}
-          </p>
-        )}
-      </div>
+      {!hosted && (
+        <div className="flex flex-col gap-5 px-6 pt-6 sm:px-8">
+          <label className="block">
+            <span className="eyebrow text-ivory-muted">Name</span>
+            <input
+              data-autofocus=""
+              className={field}
+              autoComplete="name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              required
+            />
+          </label>
+          <label className="block">
+            <span className="eyebrow text-ivory-muted">Email</span>
+            <input
+              className={field}
+              type="email"
+              inputMode="email"
+              autoComplete="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+            />
+          </label>
+        </div>
+      )}
+      {hosted && (
+        <p className="px-6 pt-5 text-[0.78rem] leading-relaxed text-ivory-muted sm:px-8">
+          Choose how many and pay securely with Stripe — card, Apple Pay or Google Pay. Your QR tickets appear
+          straight after and land in your inbox.
+        </p>
+      )}
+      {error && (
+        <p role="alert" className="px-6 pt-4 text-sm text-(--ev-accent) sm:px-8">
+          {error}
+        </p>
+      )}
 
       {/* Pay */}
       <div className="flex flex-col gap-3 px-6 pb-6 pt-7 sm:px-8 sm:pb-8">
@@ -180,7 +202,7 @@ export function CheckoutState({ event, provider, onClose, onConfirmed }: Props) 
           </Button>
         )}
         <Button type="submit" variant="event" size="lg" className="w-full" disabled={!valid || !!submitting}>
-          {submitting ? "Processing…" : `Pay ${totalLabel}`}
+          {submitting ? "Processing…" : hosted ? "Continue to payment" : `Pay ${totalLabel}`}
         </Button>
         <Button variant="ghost" onClick={onClose} className="w-full">
           Close

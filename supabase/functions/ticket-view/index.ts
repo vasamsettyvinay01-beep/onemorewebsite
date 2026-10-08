@@ -1,0 +1,34 @@
+// Public read of one order's tickets for the /tickets page.
+//   ?o=<access_token>      — the link in the ticket email
+//   ?session=<cs_...>      — right after checkout (Stripe redirect), before the email lands
+
+import { admin, corsHeaders, json } from "../_shared/http.ts";
+
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders(req) });
+  if (req.method !== "GET") return json(req, { error: "Method not allowed" }, 405);
+
+  const params = new URL(req.url).searchParams;
+  const accessToken = params.get("o");
+  const sessionId = params.get("session");
+
+  let query = admin
+    .from("orders")
+    .select(
+      "event_id, tier_id, tier_name, purchaser_name, quantity, status, access_token, tickets(guest_number, token, status, checked_in_at)",
+    );
+  if (accessToken && /^[0-9a-f]{48}$/.test(accessToken)) query = query.eq("access_token", accessToken);
+  else if (sessionId && /^cs_(test|live)_[A-Za-z0-9]{10,200}$/.test(sessionId)) query = query.eq("stripe_session_id", sessionId);
+  else return json(req, { error: "Not found" }, 404);
+
+  const { data, error } = await query.maybeSingle();
+  if (error) {
+    console.error(error);
+    return json(req, { error: "Server error" }, 500);
+  }
+  // Webhook may still be in flight right after checkout; the page polls on 404.
+  if (!data) return json(req, { error: "Not found" }, 404);
+
+  data.tickets.sort((a, b) => a.guest_number - b.guest_number);
+  return json(req, data);
+});

@@ -9,8 +9,7 @@ import { eventThemeToStyle } from "@/lib/theme";
 import { Dialog } from "@/components/ui/Dialog";
 import { ComingSoonState } from "./states/ComingSoonState";
 import { CheckoutState } from "./states/CheckoutState";
-import { ConfirmationState } from "./states/ConfirmationState";
-import { SoldOutState } from "./states/SoldOutState";
+import { ConfirmationState } from "./states/ConfirmationState";import { SoldOutState } from "./states/SoldOutState";
 import { TicketArtwork } from "./TicketArtwork";
 
 interface TicketSheetProps {
@@ -25,15 +24,15 @@ interface TicketSheetProps {
  *
  *   coming-soon / draft           → ComingSoonState
  *   sold-out                      → SoldOutState
- *   on-sale + provider live       → CheckoutState → ConfirmationState
+ *   on-sale + provider live       → CheckoutState → Stripe → /tickets
  *   on-sale + provider disabled   → ComingSoonState (sales not connected yet)
  */
 export function TicketSheet({ open, event, onClose }: TicketSheetProps) {
   const [confirmation, setConfirmation] = useState<OrderConfirmation | null>(null);
-  const provider = getCheckoutProvider();
 
   if (!event) return null;
 
+  const provider = getCheckoutProvider(event);
   const live = isOnSale(event) && provider.mode === "live";
   const themeStyle = eventThemeToStyle(event.theme);
 

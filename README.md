@@ -91,7 +91,51 @@ The sheet picks its state from event status and the `CheckoutProvider`:
 - `on-sale` with a live provider → quantity → name → email → Apple Pay / Google Pay / Pay
 - `on-sale` without a live provider → coming-soon state (never a fake checkout)
 
-The provider is selected in `src/lib/checkout.ts`. A real implementation (Stripe or
-equivalent) should call a server route; tickets must only be created after a verified
-webhook. Types for `Order`, `Ticket`, `TicketTier`, `CheckIn` and `ScanResult` are in
+The site is a static export, so the ticketing backend lives in a dedicated Supabase
+project (`supabase/`) and payments run through Stripe Payment Links.
+
+```
+GET TICKETS → Stripe Payment Link → pays → redirected to /tickets/?session=…
+                                     └→ Stripe webhook → supabase/functions/stripe-webhook
+                                          creates the order + one ticket per guest,
+                                          emails QR codes (Resend), closes capped tiers
+/tickets/?o=<link token>  → QR per guest (supabase/functions/ticket-view)
+/door                     → shared staff login, camera scanner, guest list (supabase/functions/door)
+```
+
+- A QR contains only a random 36-char token. Names and emails are never in the code.
+- Check-in is one conditional `UPDATE` in Postgres (`check_in_ticket`): a code admits once,
+  even if two phones scan it at the same moment. Every scan attempt is logged in `scans`.
+- Tier, price and guest count come from Stripe Price metadata, not from the checkout URL.
+- A full refund in Stripe cancels the order's unused tickets automatically.
+- All tables have RLS on with no policies; the browser never reads the database directly.
+
+### Setting it up
+
+1. **Supabase**: create a new project, then:
+   ```bash
+   npx supabase login
+   npx supabase link --project-ref <ref>
+   npx supabase db push
+   npx supabase functions deploy stripe-webhook ticket-view door
+   ```
+   Put the project URL and publishable key in `src/data/backend.ts`.
+   In Authentication → Users, add the door user (`backend.doorEmail`, auto-confirm, strong password),
+   and turn off public sign-ups.
+2. **Resend**: verify `theonemorecompany.com` (DNS records in Hostinger) and create an API key.
+3. **Stripe**: create the links and webhook:
+   ```powershell
+   $env:STRIPE_SECRET_KEY="sk_test_..."; $env:SITE_URL="https://theonemorecompany.com"
+   $env:WEBHOOK_URL="https://<ref>.supabase.co/functions/v1/stripe-webhook"
+   npm run stripe:setup
+   ```
+   Paste the printed links into `src/data/events.ts` and set the event `status: "on-sale"`.
+4. **Secrets** for the functions:
+   ```bash
+   npx supabase secrets set STRIPE_SECRET_KEY=sk_test_... STRIPE_WEBHOOK_SECRET=whsec_... \
+     RESEND_API_KEY=re_... TICKETS_FROM_EMAIL="One More <tickets@theonemorecompany.com>" \
+     SITE_URL=https://theonemorecompany.com DOOR_EMAILS=door@theonemorecompany.com
+   ```
+
+Going live later = re-run step 3 with `sk_live_...`, set the live secrets, swap the links. Types for `Order`, `Ticket`, `TicketTier`, `CheckIn` and `ScanResult` are in
 `src/types/ticketing.ts`.
