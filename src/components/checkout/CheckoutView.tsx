@@ -9,7 +9,7 @@ import type { StripeExpressCheckoutElementClickEvent, StripeExpressCheckoutEleme
 import { brand } from "@/data/brand";
 import { backend, backendConfigured, functionUrl } from "@/data/backend";
 import { useLiveEvent } from "@/lib/availability";
-import { formatChapter, formatEventTime, formatMoney, getEventBySlug, getVisibleTiers, isOnSale } from "@/lib/events";
+import { formatChapter, formatEventTime, formatMoney, getEventBySlug, getVisibleTiers, isOnSale, waitingFor } from "@/lib/events";
 import { cn } from "@/lib/cn";
 import type { OneMoreEvent, TicketTier } from "@/types/event";
 
@@ -147,7 +147,7 @@ function CheckoutCard({ event, initialTier }: { event: OneMoreEvent; initialTier
   const stripe = useStripe();
   const elements = useElements();
   const tiers = getVisibleTiers(event).filter((t) => !t.priceOnRequest);
-  const buyable = tiers.filter((t) => !t.soldOut && !t.unavailable);
+  const buyable = tiers.filter((t) => !t.soldOut && !t.unavailable && !waitingFor(event, t));
   const chosen = buyable.find((t) => t.id === initialTier);
   const [tierId, setTierId] = useState(chosen?.id ?? "");
   const tier: TicketTier | undefined = chosen ?? buyable.find((t) => t.id === tierId) ?? [...buyable].sort((a, b) => a.priceCents - b.priceCents)[0];
@@ -346,18 +346,20 @@ function CheckoutCard({ event, initialTier }: { event: OneMoreEvent; initialTier
               {tiers.map((t) => {
                 const selected = t.id === tier.id;
                 const gone = !!t.soldOut || !!t.unavailable;
+                const opensAfter = waitingFor(event, t);
+                const closed = gone || !!opensAfter;
                 return (
                   <button
                     key={t.id}
                     type="button"
                     role="radio"
                     aria-checked={selected}
-                    disabled={gone || busy}
+                    disabled={closed || busy}
                     onClick={() => setTierId(t.id)}
                     className={cn(
                       "flex w-full items-center justify-between gap-3 px-1 py-2 text-left transition-colors sm:py-2.5",
                       selected ? "bg-gold/10" : "hover:bg-white/[0.03]",
-                      gone && "cursor-not-allowed opacity-40",
+                      closed && "cursor-not-allowed opacity-40",
                     )}
                   >
                     <span className="flex min-w-0 items-center gap-3">
@@ -373,7 +375,7 @@ function CheckoutCard({ event, initialTier }: { event: OneMoreEvent; initialTier
                       <span className="truncate text-[0.62rem] font-semibold uppercase tracking-[0.16em] sm:text-[0.68rem]">
                         {t.name}
                         <span className="ml-2 font-normal tracking-[0.12em] text-ivory/40">
-                          {gone ? "Sold out" : (t.admits ?? 1) > 1 ? `Admits ${t.admits}` : "Admits one"}
+                          {gone ? "Sold out" : opensAfter ? `After ${opensAfter}` : (t.admits ?? 1) > 1 ? `Admits ${t.admits}` : "Admits one"}
                         </span>
                       </span>
                     </span>

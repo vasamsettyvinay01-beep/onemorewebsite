@@ -3,7 +3,7 @@
 import type { OneMoreEvent, TicketTier } from "@/types/event";
 import { brand } from "@/data/brand";
 import { getSocial } from "@/data/socials";
-import { formatTierPrice, getVisibleTiers } from "@/lib/events";
+import { formatTierPrice, getVisibleTiers, waitingFor } from "@/lib/events";
 import { cn } from "@/lib/cn";
 import { Button } from "@/components/ui/Button";
 import { SocialGlyph } from "@/components/community/SocialGlyph";
@@ -14,11 +14,12 @@ interface Props {
   onClose: () => void;
 }
 
-function tierNote(tier: TicketTier): string | undefined {
+function tierNote(event: OneMoreEvent, tier: TicketTier): string | undefined {
   if (tier.soldOut) return "Sold out";
+  const gate = waitingFor(event, tier);
+  if (gate) return `After ${gate}`;
   if (tier.capacity !== undefined) return `First ${tier.capacity} tickets`;
   if ((tier.admits ?? 1) > 1) return `Admits ${tier.admits}`;
-  if (tier.priceOnRequest) return "Ask us on WhatsApp";
 }
 
 /** Shown while ticket sales are not open / not connected. Closing is the sheet's × button. */
@@ -66,7 +67,7 @@ export function ComingSoonState({ event }: Props) {
         {tiers.length > 0 ? (
           <ul className="mt-3 grid grid-cols-2 gap-px overflow-hidden border border-ivory/10 bg-ivory/10">
             {tiers.map((t, i) => {
-              const note = tierNote(t);
+              const note = tierNote(event, t);
               return (
                 <li
                   key={t.id}

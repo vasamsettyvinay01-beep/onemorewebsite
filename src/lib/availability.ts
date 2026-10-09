@@ -8,8 +8,8 @@ type Counts = Record<string, number>;
 
 /**
  * The event with live sell-outs applied: a tier with a `capacity` is treated
- * as `soldOut` once that many have sold, which also reveals any tier that
- * `opensAfter` it. Falls back to the static data while loading or offline.
+ * as `soldOut` once that many have sold. Passes that wait on it then unlock.
+ * Falls back to the static data while loading or offline.
  */
 export function useLiveEvent(event: OneMoreEvent | null, active: boolean): OneMoreEvent | null {
   const [sold, setSold] = useState<{ eventId: string; sold: Counts; held: Counts } | null>(null);

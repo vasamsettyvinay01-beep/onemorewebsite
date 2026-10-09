@@ -3,7 +3,7 @@
 import { useState, type FormEvent } from "react";
 import type { OneMoreEvent, TicketTier } from "@/types/event";
 import type { CheckoutProvider } from "@/types/ticketing";
-import { formatMoney, getStartingTier, getVisibleTiers } from "@/lib/events";
+import { formatMoney, getStartingTier, getVisibleTiers, waitingFor } from "@/lib/events";
 import { Button } from "@/components/ui/Button";
 import { SheetHeader } from "./SheetHeader";
 
@@ -43,24 +43,29 @@ export function CheckoutState({ event, provider }: Props) {
 
       <div className="mx-6 mt-4 flex min-h-0 flex-1 flex-col border-y border-ivory/10 py-2 sm:mx-8">
         {tiers.length > 1 ? (
-          <fieldset className="flex min-h-0 flex-1 flex-col justify-evenly">
+          <fieldset className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto">
             <legend className="eyebrow mb-1 text-ivory-muted">Ticket</legend>
             {tiers.map((t) => {
               const gone = !!t.soldOut || !!t.unavailable;
+              const opensAfter = waitingFor(event, t);
+              const closed = gone || !!opensAfter;
               return (
-              <label key={t.id} className={`flex items-center justify-between gap-4 ${gone ? "cursor-not-allowed" : "cursor-pointer"}`}>
+              <label key={t.id} className={`flex items-center justify-between gap-4 ${closed ? "cursor-not-allowed" : "cursor-pointer"}`}>
                 <span className="flex items-center gap-3">
                   <input
                     type="radio"
                     name="tier"
                     className="size-3.5 accent-(--ev-accent)"
-                    checked={!gone && t.id === tier.id}
-                    disabled={gone}
+                    checked={!closed && t.id === tier.id}
+                    disabled={closed}
                     onChange={() => setTier(t)}
                   />
-                  <span className={`text-[0.78rem] uppercase tracking-[0.16em] ${gone ? "text-ivory/35" : ""}`}>
+                  <span className={`text-[0.78rem] uppercase tracking-[0.16em] ${closed ? "text-ivory/35" : ""}`}>
                     {t.name}
                     {gone && <span className="ml-2 font-semibold tracking-[0.14em] text-(--ev-accent)">Sold out</span>}
+                    {!gone && opensAfter && (
+                      <span className="ml-2 font-semibold tracking-[0.14em] text-ivory/45">After {opensAfter}</span>
+                    )}
                   </span>
                 </span>
                 <span className={`font-display text-xl leading-none ${gone ? "text-ivory/30 line-through" : ""}`}>
