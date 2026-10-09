@@ -1,6 +1,6 @@
 // Public read of one order's tickets for the /tickets page.
 //   ?o=<access_token>      — the link in the ticket email
-//   ?session=<cs_...>      — right after checkout (Stripe redirect), before the email lands
+//   ?session=<pi_...>      — right after checkout, before the email lands
 
 import { admin, corsHeaders, json } from "../_shared/http.ts";
 
@@ -15,10 +15,10 @@ Deno.serve(async (req) => {
   let query = admin
     .from("orders")
     .select(
-      "event_id, tier_id, tier_name, purchaser_name, quantity, status, access_token, tickets(guest_number, token, status, checked_in_at)",
+      "event_id, tier_id, tier_name, purchaser_name, purchaser_email, quantity, status, access_token, tickets(guest_number, token, status, checked_in_at)",
     );
   if (accessToken && /^[0-9a-f]{48}$/.test(accessToken)) query = query.eq("access_token", accessToken);
-  else if (sessionId && /^cs_(test|live)_[A-Za-z0-9]{10,200}$/.test(sessionId)) query = query.eq("stripe_session_id", sessionId);
+  else if (sessionId && /^(cs_(test|live)_|pi_)[A-Za-z0-9]{10,200}$/.test(sessionId)) query = query.eq("stripe_session_id", sessionId);
   else return json(req, { error: "Not found" }, 404);
 
   const { data, error } = await query.maybeSingle();

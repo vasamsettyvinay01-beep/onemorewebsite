@@ -37,7 +37,7 @@ export const events: OneMoreEvent[] = [
     id: "evt_diwali_night",
     slug: "diwali-night",
     name: "Diwali Night",
-    status: "on-sale", // LOCAL TEST ONLY — revert to "coming-soon" before deploying
+    status: "on-sale",
     featured: true,
     chapter: 1,
     eyebrow: "NEXT UP",
@@ -64,6 +64,13 @@ export const events: OneMoreEvent[] = [
       height: 1600,
       focal: "50% 52%",
     },
+    checkoutArtwork: {
+      src: "/events/diwali-night/checkout-backdrop.webp",
+      alt: "",
+      width: 2400,
+      height: 1371,
+      focal: "72% 50%",
+    },
     theme: {
       primary: "#0B1430", // deep midnight blue
       secondary: "#7A1544", // magenta
@@ -89,11 +96,36 @@ export const events: OneMoreEvent[] = [
       mapUrl: "https://www.google.com/maps/search/?api=1&query=The+Nichols+Venue+2515+Morse+St+Houston+TX+77019",
     },
     city: "Houston",
+    invitation: "A DJ, an open floor, nine until two. Dress for the evening.",
+    partner: "Pista House",
+    notice: "Food and alcohol are for sale at the event, and are not included with your pass.",
+    partners: [
+      {
+        name: "Pista House",
+        logo: "/brand/partners/pista-house.png",
+        width: 819,
+        height: 454,
+        note: "Food and alcohol are for sale at the event, not included.",
+      },
+      {
+        name: "Pumpkin",
+        logo: "/brand/partners/pumpkin.png",
+        width: 1020,
+        height: 432,
+      },
+      {
+        name: "Dumont Creamery & Café",
+        logo: "/brand/partners/dumont.png",
+        width: 824,
+        height: 232,
+      },
+    ],
     // saleStart, saleEnd: not finalised yet.
-    // Selling: run `npm run stripe:setup`, paste each printed link as `paymentLink` on its tier,
-    // then set status: "on-sale". Until every buyable tier has a link the sheet stays on COMING SOON.
+    // Selling: run `npm run stripe:setup` after any tier change (it syncs prices to the backend),
+    // then set status: "on-sale".
     ticketTiers: [
-      // Set soldOut: true once all 50 are gone — that also reveals the Group of 5 tier.
+      // Early Bird sells out automatically at `capacity` (live count from the backend), which
+      // also reveals Group of 5. `soldOut: true` is only needed to force it closed early.
       {
         id: "early-bird",
         name: "Early Bird",
@@ -101,14 +133,12 @@ export const events: OneMoreEvent[] = [
         currency: "USD",
         capacity: 50,
         soldOut: false,
-        paymentLink: "https://buy.stripe.com/test_4gMdR9cb239C3JA9a0enS00",
       },
       {
         id: "general",
         name: "General Admission",
         priceCents: 2000,
         currency: "USD",
-        paymentLink: "https://buy.stripe.com/test_fZu7sL5ME8tWbc20DuenS01",
       },
       {
         id: "couple",
@@ -116,7 +146,6 @@ export const events: OneMoreEvent[] = [
         priceCents: 3000,
         currency: "USD",
         admits: 2,
-        paymentLink: "https://buy.stripe.com/test_4gM3cvgridOgcg64TKenS02",
       },
       {
         id: "group",
@@ -125,7 +154,6 @@ export const events: OneMoreEvent[] = [
         currency: "USD",
         admits: 5,
         opensAfter: "early-bird",
-        paymentLink: "https://buy.stripe.com/test_cNieVda2UeSkdka3PGenS03",
       },
       { id: "vip", name: "VIP", priceCents: 0, currency: "USD", priceOnRequest: true, hidden: true },
     ],

@@ -92,13 +92,15 @@ The sheet picks its state from event status and the `CheckoutProvider`:
 - `on-sale` without a live provider → coming-soon state (never a fake checkout)
 
 The site is a static export, so the ticketing backend lives in a dedicated Supabase
-project (`supabase/`) and payments run through Stripe Payment Links.
+project (`supabase/`) and payments run through Stripe Elements on our own `/checkout` page.
 
 ```
-GET TICKETS → Stripe Payment Link → pays → redirected to /tickets/?session=…
-                                     └→ Stripe webhook → supabase/functions/stripe-webhook
-                                          creates the order + one ticket per guest,
-                                          emails QR codes (Resend), closes capped tiers
+GET TICKETS → /checkout (tier, quantity, guest, card / Apple Pay / Google Pay)
+                → supabase/functions/checkout prices it server-side from `tiers`,
+                  enforces caps + opensAfter, creates the PaymentIntent
+                → pays → /tickets/?session=pi_…
+                         └→ Stripe webhook → supabase/functions/stripe-webhook
+                              creates the order + one ticket per guest, emails QR codes (Resend)
 /tickets/?o=<link token>  → QR per guest (supabase/functions/ticket-view)
 /door                     → shared staff login, camera scanner, guest list (supabase/functions/door)
 ```
@@ -106,7 +108,8 @@ GET TICKETS → Stripe Payment Link → pays → redirected to /tickets/?session
 - A QR contains only a random 36-char token. Names and emails are never in the code.
 - Check-in is one conditional `UPDATE` in Postgres (`check_in_ticket`): a code admits once,
   even if two phones scan it at the same moment. Every scan attempt is logged in `scans`.
-- Tier, price and guest count come from Stripe Price metadata, not from the checkout URL.
+- Tier, price and guest count come from the `tiers` table (synced from `events.ts` by
+  `npm run stripe:setup`), never from the browser.
 - A full refund in Stripe cancels the order's unused tickets automatically.
 - All tables have RLS on with no policies; the browser never reads the database directly.
 
@@ -117,19 +120,21 @@ GET TICKETS → Stripe Payment Link → pays → redirected to /tickets/?session
    npx supabase login
    npx supabase link --project-ref <ref>
    npx supabase db push
-   npx supabase functions deploy stripe-webhook ticket-view door
+   npx supabase functions deploy checkout stripe-webhook ticket-view door availability --use-api
    ```
    Put the project URL and publishable key in `src/data/backend.ts`.
    In Authentication → Users, add the door user (`backend.doorEmail`, auto-confirm, strong password),
    and turn off public sign-ups.
 2. **Resend**: verify `theonemorecompany.com` (DNS records in Hostinger) and create an API key.
-3. **Stripe**: create the links and webhook:
-   ```powershell
-   $env:STRIPE_SECRET_KEY="sk_test_..."; $env:SITE_URL="https://theonemorecompany.com"
-   $env:WEBHOOK_URL="https://<ref>.supabase.co/functions/v1/stripe-webhook"
+3. **Stripe**: put `stripeKey` (publishable) in `src/data/backend.ts`, then with
+   `STRIPE_SECRET_KEY`, `SUPABASE_PROJECT_REF`, `SUPABASE_SECRET_KEY` and
+   `WEBHOOK_URL=https://<ref>.supabase.co/functions/v1/stripe-webhook` in `.env.local`:
+   ```bash
    npm run stripe:setup
    ```
-   Paste the printed links into `src/data/events.ts` and set the event `status: "on-sale"`.
+   It syncs the event's tiers to the backend and points the webhook at
+   `payment_intent.succeeded` + `charge.refunded`. Re-run after any tier/price change,
+   then set the event `status: "on-sale"`.
 4. **Secrets** for the functions:
    ```bash
    npx supabase secrets set STRIPE_SECRET_KEY=sk_test_... STRIPE_WEBHOOK_SECRET=whsec_... \
@@ -137,5 +142,5 @@ GET TICKETS → Stripe Payment Link → pays → redirected to /tickets/?session
      SITE_URL=https://theonemorecompany.com DOOR_EMAILS=door@theonemorecompany.com
    ```
 
-Going live later = re-run step 3 with `sk_live_...`, set the live secrets, swap the links. Types for `Order`, `Ticket`, `TicketTier`, `CheckIn` and `ScanResult` are in
+Going live later = live keys in step 3 (`sk_live_…` / `pk_live_…`), re-run it, set the live secrets. Types for `Order`, `Ticket`, `TicketTier`, `CheckIn` and `ScanResult` are in
 `src/types/ticketing.ts`.

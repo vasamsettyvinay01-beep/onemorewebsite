@@ -5,7 +5,10 @@ export const SITE_URL = (Deno.env.get("SITE_URL") ?? "").replace(/\/$/, "");
 /** Browsers may call these functions only from the public site. */
 export function corsHeaders(req: Request): HeadersInit {
   const origin = req.headers.get("origin") ?? "";
-  const allowed = origin === SITE_URL || /^http:\/\/localhost:\d+$/.test(origin);
+  const allowed =
+    origin === SITE_URL ||
+    origin === SITE_URL.replace("://", "://www.") ||
+    /^http:\/\/localhost:\d+$/.test(origin);
   return {
     "Access-Control-Allow-Origin": allowed ? origin : SITE_URL,
     "Access-Control-Allow-Headers": "authorization, content-type, apikey, x-client-info",

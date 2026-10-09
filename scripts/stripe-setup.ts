@@ -1,22 +1,27 @@
 /**
- * Creates (or reuses) the Stripe products, prices and Payment Links for an
- * event's ticket tiers, plus the webhook that issues tickets.
+ * Syncs an event's ticket tiers to the ticketing backend and Stripe.
  *
- *   $env:STRIPE_SECRET_KEY="sk_test_..."
- *   $env:SITE_URL="https://example.com"
- *   $env:WEBHOOK_URL="https://<project>.supabase.co/functions/v1/stripe-webhook"
- *   node scripts/stripe-setup.ts [event-slug]
+ *   node --env-file=.env.local scripts/stripe-setup.ts [event-slug]
  *
- * Safe to re-run. A price change creates a new price + link; the old link is
- * deactivated. Prints the links to paste into src/data/events.ts.
+ * Needs in env: STRIPE_SECRET_KEY, SUPABASE_PROJECT_REF, SUPABASE_SECRET_KEY,
+ * and WEBHOOK_URL (the stripe-webhook function URL).
+ *
+ *  1. Upserts every sellable tier into the `tiers` table — the server-side
+ *     price list the `checkout` function charges from.
+ *  2. Points the Stripe webhook at payment_intent.succeeded + charge.refunded
+ *     (prints the signing secret when it creates the endpoint).
+ *  3. Deactivates Payment Links from the earlier hosted-checkout setup.
+ *
+ * Safe to re-run after any change to tiers in src/data/events.ts.
  */
 import { events } from "../src/data/events.ts";
 
 const key = process.env.STRIPE_SECRET_KEY;
-const siteUrl = process.env.SITE_URL?.replace(/\/$/, "");
+const ref = process.env.SUPABASE_PROJECT_REF;
+const secret = process.env.SUPABASE_SECRET_KEY;
 const webhookUrl = process.env.WEBHOOK_URL;
-if (!key || !siteUrl) {
-  console.error("Set STRIPE_SECRET_KEY and SITE_URL (and WEBHOOK_URL to create the webhook).");
+if (!key || !ref || !secret) {
+  console.error("Set STRIPE_SECRET_KEY, SUPABASE_PROJECT_REF and SUPABASE_SECRET_KEY (and WEBHOOK_URL).");
   process.exit(1);
 }
 
@@ -29,7 +34,7 @@ if (!event) {
 
 type Params = Record<string, unknown>;
 /** The few fields this script reads off Stripe responses. */
-type StripeObj = { id: string; url: string; secret: string; metadata: Record<string, string>; data: StripeObj[]; has_more: boolean };
+type StripeObj = { id: string; url: string; secret: string; active: boolean; metadata: Record<string, string>; data: StripeObj[]; has_more: boolean };
 
 function encode(params: Params, prefix = ""): string[] {
   return Object.entries(params).flatMap(([k, v]) => {
@@ -64,101 +69,91 @@ async function listAll(path: string, params: Params = {}): Promise<StripeObj[]> 
   }
 }
 
-const when = event.date
-  ? new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" }).format(
+const clock = (hhmm: string) => {
+  const [h, m] = hhmm.split(":").map(Number);
+  return `${h % 12 || 12}${m ? `:${String(m).padStart(2, "0")}` : ""} ${h < 12 ? "AM" : "PM"}`;
+};
+const dateLabel = event.date
+  ? new Intl.DateTimeFormat("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" }).format(
       new Date(`${event.date}T12:00:00`),
-    ) + (event.startTime ? ` · ${event.startTime}${event.endTime ? `–${event.endTime}` : ""}` : "")
+    )
   : "";
-const where = [event.venue?.name, event.venue?.address ?? event.city].filter(Boolean).join(", ");
+const assets = `https://${ref}.supabase.co/storage/v1/object/public/brand/${event.slug}`;
+
+/** Event details copied onto every PaymentIntent, then into the pass email. */
+const eventMeta = {
+  omc_event_name: event.name,
+  omc_chapter: event.chapter !== undefined ? String(event.chapter).padStart(2, "0") : "",
+  omc_event_date: dateLabel,
+  omc_event_time: event.startTime ? `${clock(event.startTime)}${event.endTime ? ` – ${clock(event.endTime)}` : ""}` : "",
+  omc_venue_name: event.venue?.name ?? event.city ?? "",
+  omc_venue_address: event.venue?.address ?? event.city ?? "",
+  omc_map_url: event.venue?.mapUrl ?? "",
+  omc_hero_url: `${assets}/hero.jpg`,
+  omc_min_age: event.minimumAge ? String(event.minimumAge) : "",
+  omc_invitation: event.invitation ?? "",
+  omc_partner: event.partner ?? "",
+  omc_notice: event.notice ?? "",
+  omc_partners: JSON.stringify(
+    (event.partners ?? []).map((p) => ({
+      name: p.name,
+      logo: p.logo.replace(/^\/brand\//, ""),
+      w: p.width,
+      h: p.height,
+      note: p.note ?? "",
+    })),
+  ),
+};
 
 const mode = key.startsWith("sk_live") ? "LIVE" : "TEST";
 console.log(`\n${mode} mode · ${event.name} (${event.id})\n`);
 
-const existingLinks = await listAll("payment_links", { active: true });
-const results: { tier: string; url: string }[] = [];
-
-for (const tier of event.ticketTiers) {
-  if (tier.priceOnRequest || tier.priceCents <= 0) continue;
-
-  const lookupKey = `omc__${event.id}__${tier.id}__${tier.priceCents}`;
-  const metadata = {
-    omc_event_id: event.id,
-    omc_tier_id: tier.id,
-    omc_tier_name: tier.name,
-    omc_admits: String(tier.admits ?? 1),
-    omc_capacity: tier.capacity ? String(tier.capacity) : "",
-    omc_event_name: event.name,
-    omc_event_when: when,
-    omc_event_where: where,
-    omc_min_age: event.minimumAge ? String(event.minimumAge) : "",
-  };
-
-  let price = (await stripe("GET", "prices", { lookup_keys: [lookupKey], expand: ["data.product"] })).data[0];
-  if (!price) {
-    const product = await stripe("POST", "products", {
-      name: `${event.name} — ${tier.name}`,
-      description: (tier.admits ?? 1) > 1 ? `Admits ${tier.admits}. One QR code per guest.` : "Admits 1.",
-      metadata,
-    });
-    price = await stripe("POST", "prices", {
-      product: product.id,
-      unit_amount: tier.priceCents,
-      currency: tier.currency.toLowerCase(),
-      lookup_key: lookupKey,
-      transfer_lookup_key: true,
-      metadata,
-    });
-  } else {
-    await stripe("POST", `prices/${price.id}`, { metadata });
-  }
-
-  const linkParams = {
-    after_completion: { type: "redirect", redirect: { url: `${siteUrl}/tickets/?session={CHECKOUT_SESSION_ID}` } },
-    metadata: { omc_lookup_key: lookupKey, omc_event_id: event.id, omc_tier_id: tier.id },
-  };
-
-  const sameTier = existingLinks.filter((l) => l.metadata?.omc_event_id === event.id && l.metadata?.omc_tier_id === tier.id);
-  let link = sameTier.find((l) => l.metadata?.omc_lookup_key === lookupKey);
-  for (const stale of sameTier.filter((l) => l !== link)) {
-    await stripe("POST", `payment_links/${stale.id}`, { active: false });
-    console.log(`  deactivated old ${tier.name} link ${stale.url}`);
-  }
-
-  if (link) {
-    link = await stripe("POST", `payment_links/${link.id}`, linkParams);
-  } else {
-    link = await stripe("POST", "payment_links", {
-      ...linkParams,
-      line_items: [
-        {
-          price: price.id,
-          quantity: 1,
-          adjustable_quantity: { enabled: true, minimum: 1, maximum: tier.maxPerOrder ?? 10 },
-        },
-      ],
-      phone_number_collection: { enabled: false },
-    });
-  }
-  results.push({ tier: tier.id, url: link.url });
-  console.log(`  ${tier.name.padEnd(20)} ${link.url}`);
+// 1. Tiers
+const rows = event.ticketTiers.map((t) => ({
+  event_id: event.id,
+  tier_id: t.id,
+  name: t.name,
+  price_cents: Math.max(t.priceCents, 1),
+  currency: t.currency.toLowerCase(),
+  admits: t.admits ?? 1,
+  capacity: t.capacity ?? null,
+  max_per_order: t.maxPerOrder ?? 10,
+  opens_after: t.opensAfter ?? null,
+  active: !t.priceOnRequest && !t.hidden && !t.soldOut && t.priceCents > 0,
+  metadata: eventMeta,
+  updated_at: new Date().toISOString(),
+}));
+const res = await fetch(`https://${ref}.supabase.co/rest/v1/tiers?on_conflict=event_id,tier_id`, {
+  method: "POST",
+  headers: {
+    apikey: secret,
+    Authorization: `Bearer ${secret}`,
+    "Content-Type": "application/json",
+    Prefer: "resolution=merge-duplicates",
+  },
+  body: JSON.stringify(rows),
+});
+if (!res.ok) throw new Error(`Saving tiers: ${res.status} ${await res.text()}`);
+for (const r of rows) {
+  console.log(`  ${r.active ? "on " : "off"}  ${r.name.padEnd(20)} $${(r.price_cents / 100).toFixed(2)}  admits ${r.admits}${r.capacity ? `  cap ${r.capacity}` : ""}`);
 }
 
+// 2. Webhook
 if (webhookUrl) {
-  const enabled_events = ["checkout.session.completed", "checkout.session.async_payment_succeeded", "charge.refunded"];
-  const endpoints = await listAll("webhook_endpoints");
-  const existing = endpoints.find((e) => e.url === webhookUrl);
+  const enabled_events = ["checkout.session.completed", "payment_intent.succeeded", "charge.refunded"];
+  const existing = (await listAll("webhook_endpoints")).find((e) => e.url === webhookUrl);
   if (existing) {
     await stripe("POST", `webhook_endpoints/${existing.id}`, { enabled_events });
-    console.log(`\nWebhook already exists (${existing.id}). Its signing secret is in the Stripe dashboard.`);
+    console.log(`\nWebhook ${existing.id} listens for ${enabled_events.join(", ")}.`);
   } else {
-    const created = await stripe("POST", "webhook_endpoints", {
-      url: webhookUrl,
-      enabled_events,
-      description: "One More tickets",
-    });
+    const created = await stripe("POST", "webhook_endpoints", { url: webhookUrl, enabled_events, description: "One More passes" });
     console.log(`\nWebhook created. Set this as the STRIPE_WEBHOOK_SECRET Supabase secret:\n  ${created.secret}`);
   }
 }
 
-console.log("\nPaste into src/data/events.ts:");
-for (const r of results) console.log(`  ${r.tier}: paymentLink: "${r.url}",`);
+// 3. Retire hosted Payment Links
+for (const link of await listAll("payment_links", { active: true })) {
+  if (link.metadata?.omc_event_id !== event.id) continue;
+  await stripe("POST", `payment_links/${link.id}`, { active: false });
+  console.log(`  retired payment link ${link.url}`);
+}

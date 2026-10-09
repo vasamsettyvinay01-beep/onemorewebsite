@@ -80,8 +80,6 @@ export interface TicketTier {
   capacity?: number;
   /** Max tickets per order for this tier. */
   maxPerOrder?: number;
-  /** Stripe Payment Link (https://buy.stripe.com/...) that sells this tier. */
-  paymentLink?: string;
   saleStart?: string;
   saleEnd?: string;
 }
@@ -113,6 +111,8 @@ export interface OneMoreEvent {
   ticketArtwork?: Artwork;
   /** Square variant of `ticketArtwork` for the mobile sheet banner, so it fills edge to edge. */
   ticketArtworkMobile?: Artwork;
+  /** Wide, text-free backdrop for /checkout with dark negative space on the left. Falls back to `ticketArtwork`. */
+  checkoutArtwork?: Artwork;
   theme: EventTheme;
   /** ISO 8601 date (YYYY-MM-DD). Omit if not announced. */
   date?: string;
@@ -124,6 +124,14 @@ export interface OneMoreEvent {
   venue?: EventVenue;
   city?: string;
   minimumAge?: number;
+  /** A short note on the pass and in the pass email: the evening, in one breath. */
+  invitation?: string;
+  /** Named partner printed large on the pass, such as the food partner. */
+  partner?: string;
+  /** The plain fact under the partner name. */
+  notice?: string;
+  /** Brand marks shown together at the foot of the pass. */
+  partners?: { name: string; logo: string; width: number; height: number; note?: string }[];
   ticketTiers: TicketTier[];
   capacity?: number;
   saleStart?: string;

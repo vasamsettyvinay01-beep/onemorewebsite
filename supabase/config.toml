@@ -11,3 +11,9 @@ verify_jwt = false
 
 [functions.door]
 verify_jwt = false
+
+[functions.availability]
+verify_jwt = false
+
+[functions.checkout]
+verify_jwt = false

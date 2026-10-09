@@ -4,12 +4,14 @@ import { useState } from "react";
 import type { OneMoreEvent } from "@/types/event";
 import type { OrderConfirmation } from "@/types/ticketing";
 import { getCheckoutProvider } from "@/lib/checkout";
+import { useLiveEvent } from "@/lib/availability";
 import { isOnSale } from "@/lib/events";
 import { eventThemeToStyle } from "@/lib/theme";
 import { Dialog } from "@/components/ui/Dialog";
 import { ComingSoonState } from "./states/ComingSoonState";
 import { CheckoutState } from "./states/CheckoutState";
-import { ConfirmationState } from "./states/ConfirmationState";import { SoldOutState } from "./states/SoldOutState";
+import { ConfirmationState } from "./states/ConfirmationState";
+import { SoldOutState } from "./states/SoldOutState";
 import { TicketArtwork } from "./TicketArtwork";
 
 interface TicketSheetProps {
@@ -24,16 +26,18 @@ interface TicketSheetProps {
  *
  *   coming-soon / draft           → ComingSoonState
  *   sold-out                      → SoldOutState
- *   on-sale + provider live       → CheckoutState → Stripe → /tickets
+ *   on-sale + provider live       → CheckoutState → /checkout → /tickets
  *   on-sale + provider disabled   → ComingSoonState (sales not connected yet)
  */
-export function TicketSheet({ open, event, onClose }: TicketSheetProps) {
+export function TicketSheet({ open, event: staticEvent, onClose }: TicketSheetProps) {
   const [confirmation, setConfirmation] = useState<OrderConfirmation | null>(null);
+  const event = useLiveEvent(staticEvent, open);
 
   if (!event) return null;
 
   const provider = getCheckoutProvider(event);
   const live = isOnSale(event) && provider.mode === "live";
+  const soldOutKey = event.ticketTiers.filter((t) => t.soldOut).map((t) => t.id).join();
   const themeStyle = eventThemeToStyle(event.theme);
 
   let content: React.ReactNode;
@@ -44,6 +48,7 @@ export function TicketSheet({ open, event, onClose }: TicketSheetProps) {
   } else if (live) {
     content = (
       <CheckoutState
+        key={soldOutKey}
         event={event}
         provider={provider}
         onClose={onClose}

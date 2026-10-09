@@ -17,8 +17,8 @@ interface Props {
 
 /**
  * The fast-checkout UI: tier → quantity → name → email → pay.
- * With a hosted provider (Stripe Payment Links) it is just tier → continue,
- * and Stripe collects the rest.
+ * When the provider collects purchaser details (the on-site /checkout page)
+ * it is just tier → continue, and that page collects the rest.
  * Only rendered when a live CheckoutProvider is configured. It never
  * generates tickets itself; confirmation must come from the server after a
  * verified payment (webhook), which `provider.createCheckout` is expected to
@@ -33,7 +33,7 @@ export function CheckoutState({ event, provider, onClose, onConfirmed }: Props) 
   const [submitting, setSubmitting] = useState<PaymentMethod | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Back from a hosted payment page can restore this page from bfcache mid-"Processing…".
+  // Back from the checkout page can restore this page from bfcache mid-"Processing…".
   useEffect(() => {
     const reset = (e: PageTransitionEvent) => e.persisted && setSubmitting(null);
     window.addEventListener("pageshow", reset);
@@ -179,8 +179,8 @@ export function CheckoutState({ event, provider, onClose, onConfirmed }: Props) 
       )}
       {hosted && (
         <p className="px-6 pt-5 text-[0.78rem] leading-relaxed text-ivory-muted sm:px-8">
-          Choose how many and pay securely with Stripe — card, Apple Pay or Google Pay. Your QR tickets appear
-          straight after and land in your inbox.
+          Choose how many on the next page and pay by card, Apple Pay or Google Pay. Your QR passes appear the
+          moment you book and land in your inbox.
         </p>
       )}
       {error && (
