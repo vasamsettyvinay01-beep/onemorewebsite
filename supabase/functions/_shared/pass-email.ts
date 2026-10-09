@@ -184,6 +184,7 @@ export function renderPassEmail(input: PassEmail): { subject: string; html: stri
 
     <tr><td align="center" bgcolor="${C.stock}" style="padding:6px 8px 8px;background:${C.stock};font:400 10px/1.3 ${SANS};color:${C.muted};white-space:nowrap">
       ${door} &middot; <a href="${d.ticketsUrl}" style="color:${C.gold};text-decoration:none">View passes</a>
+      <div style="margin-top:3px;font:400 9px/1.3 ${SANS};color:${C.muted}">Non-refundable unless the event is cancelled &middot; <a href="https://theonemorecompany.com/refunds/" style="color:${C.muted}">Policy</a></div>
     </td></tr>
 
   </table>
@@ -204,6 +205,7 @@ export function renderPassEmail(input: PassEmail): { subject: string; html: stri
     `Your passes: ${d.ticketsUrl}`,
     "",
     "One pass per guest. Each pass is scanned once — keep them private.",
+    "Tickets are non-refundable unless the event is cancelled: https://theonemorecompany.com/refunds/",
   ].join("\n");
 
   const subject = first

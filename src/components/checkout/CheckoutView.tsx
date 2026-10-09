@@ -436,6 +436,12 @@ function CheckoutCard({ event, initialTier }: { event: OneMoreEvent; initialTier
           >
             {busy ? "Securing your passes…" : `Book · ${totalLabel}`}
           </button>
+          <p className="mt-2 text-center text-[0.68rem] text-ivory/50">
+            All sales final. No refunds unless the event is cancelled.{" "}
+            <a href="/refunds/" target="_blank" className="text-gold/80 underline-offset-2 hover:underline">
+              Policy
+            </a>
+          </p>
         </div>
       </div>
 

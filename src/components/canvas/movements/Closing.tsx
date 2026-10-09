@@ -91,6 +91,12 @@ export function Closing() {
                 © {year} {brand.name}
               </p>
               <a
+                href="/refunds/"
+                className="py-1 text-[0.6rem] font-semibold uppercase tracking-[0.16em] text-ivory/55 transition-colors duration-500 hover:text-ivory"
+              >
+                Refund policy
+              </a>
+              <a
                 href={`#${anchors.arrival}`}
                 className="group inline-flex items-center gap-2 py-1 text-[0.6rem] font-semibold uppercase tracking-[0.16em] text-ivory/55 transition-colors duration-500 hover:text-ivory"
               >
