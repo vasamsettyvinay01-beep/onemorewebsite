@@ -34,7 +34,17 @@ if (!event) {
 
 type Params = Record<string, unknown>;
 /** The few fields this script reads off Stripe responses. */
-type StripeObj = { id: string; url: string; secret: string; active: boolean; metadata: Record<string, string>; data: StripeObj[]; has_more: boolean };
+type StripeObj = {
+  id: string;
+  url: string;
+  secret: string;
+  active: boolean;
+  unit_amount: number;
+  currency: string;
+  metadata: Record<string, string>;
+  data: StripeObj[];
+  has_more: boolean;
+};
 
 function encode(params: Params, prefix = ""): string[] {
   return Object.entries(params).flatMap(([k, v]) => {
@@ -105,7 +115,7 @@ const eventMeta = {
   ),
 };
 
-const mode = key.startsWith("sk_live") ? "LIVE" : "TEST";
+const mode = key.includes("_live_") ? "LIVE" : "TEST";
 console.log(`\n${mode} mode · ${event.name} (${event.id})\n`);
 
 // 1. Tiers
@@ -136,6 +146,37 @@ const res = await fetch(`https://${ref}.supabase.co/rest/v1/tiers?on_conflict=ev
 if (!res.ok) throw new Error(`Saving tiers: ${res.status} ${await res.text()}`);
 for (const r of rows) {
   console.log(`  ${r.active ? "on " : "off"}  ${r.name.padEnd(20)} $${(r.price_cents / 100).toFixed(2)}  admits ${r.admits}${r.capacity ? `  cap ${r.capacity}` : ""}`);
+}
+
+// Catalog entries in the Stripe Dashboard. Hidden or price-on-request tiers stay out.
+const catalog = (await listAll("products")).filter((p) => p.metadata?.omc_event_id === event.id);
+for (const tier of event.ticketTiers) {
+  if (tier.priceOnRequest || tier.hidden || tier.priceCents <= 0) continue;
+  const fields = {
+    name: `${event.name} · ${tier.name}`,
+    description: `${event.name} pass. Admits ${tier.admits ?? 1}.`,
+    metadata: { omc_event_id: event.id, omc_tier_id: tier.id, omc_admits: String(tier.admits ?? 1) },
+  };
+  const found = catalog.find((p) => p.metadata?.omc_tier_id === tier.id);
+  const product = found ? await stripe("POST", `products/${found.id}`, fields) : await stripe("POST", "products", fields);
+  const prices = await listAll("prices", { product: product.id, active: true });
+  const current = prices.find((p) => p.unit_amount === tier.priceCents && p.currency === tier.currency.toLowerCase());
+  if (current) {
+    await stripe("POST", `prices/${current.id}`, { lookup_key: `${event.id}:${tier.id}`, transfer_lookup_key: true });
+    continue;
+  }
+  const price = await stripe("POST", "prices", {
+    product: product.id,
+    unit_amount: tier.priceCents,
+    currency: tier.currency.toLowerCase(),
+    lookup_key: `${event.id}:${tier.id}`,
+    transfer_lookup_key: true,
+    metadata: { omc_tier_id: tier.id },
+  });
+  for (const old of prices) {
+    if (old.id !== price.id) await stripe("POST", `prices/${old.id}`, { active: false });
+  }
+  console.log(`  catalog  ${tier.name}  ${price.id}`);
 }
 
 // 2. Webhook

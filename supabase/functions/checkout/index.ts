@@ -69,12 +69,34 @@ async function handle(req: Request): Promise<Response> {
   }
 
   const meta = tier.metadata as Record<string, string>;
+  const prices = await stripe.prices.list({ lookup_keys: [`${eventId}:${tierId}`], active: true, limit: 1 });
+  const price = prices.data[0];
+  const unit = price?.unit_amount ?? tier.price_cents;
+  const currency = price?.currency ?? tier.currency;
+  const productName = `${meta.omc_event_name ?? eventId} · ${tier.name}`;
+  // Ticket tax is based on the venue, and the listed price already includes it.
+  const calculation = await stripe.tax.calculations.create({
+    currency,
+    customer_details: {
+      address: { line1: "2515 Morse St", city: "Houston", state: "TX", postal_code: "77019", country: "US" },
+      address_source: "billing",
+    },
+    line_items: [
+      {
+        amount: unit * quantity,
+        reference: tierId,
+        tax_behavior: "inclusive",
+        tax_code: "txcd_50010001",
+        performance_location: "taxloc_1UOYi1FhhmOQLzPEyZNgpBcS",
+      },
+    ],
+  });
   const intent = await stripe.paymentIntents.create({
-    amount: tier.price_cents * quantity,
-    currency: tier.currency,
+    amount: calculation.amount_total,
+    currency,
     payment_method_types: ["card"],
     receipt_email: email,
-    description: `${meta.omc_event_name ?? eventId} · ${tier.name} × ${quantity}`,
+    description: `${productName} × ${quantity}`,
     statement_descriptor_suffix: "ONE MORE",
     metadata: {
       ...meta,
@@ -86,8 +108,20 @@ async function handle(req: Request): Promise<Response> {
       omc_quantity: String(quantity),
       omc_name: name,
       omc_email: email,
+      omc_price_id: price?.id ?? "",
     },
-  });
+    hooks: { inputs: { tax: { calculation: calculation.id } } },
+    amount_details: {
+      line_items: [
+        {
+          product_name: productName,
+          product_code: tierId.replace(/[^a-z0-9]/gi, "").slice(0, 12),
+          unit_cost: unit,
+          quantity,
+        },
+      ],
+    },
+  } as Stripe.PaymentIntentCreateParams);
 
   return json(req, { clientSecret: intent.client_secret, paymentIntentId: intent.id });
 }
