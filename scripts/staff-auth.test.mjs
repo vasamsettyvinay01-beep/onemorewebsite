@@ -139,6 +139,10 @@ test("audit metadata drops credentials and keeps a safe email", () => {
   const door = readFileSync(new URL("../supabase/functions/door/index.ts", import.meta.url), "utf8");
   assert.match(door, /canUseScanner/);
   assert.match(door, /DOOR_EMAILS/);
+  assert.match(door, /staff_roles/);
+  assert.match(door, /jwtAal/);
+  assert.match(door, /action === "session"/);
+  assert.doesNotMatch(door, /body\.role/);
 });
 
 test("privileged verification requires the server role and aal2", () => {

@@ -1,15 +1,20 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
-import type { Session } from "@supabase/supabase-js";
 import QrScanner from "qr-scanner";
 import { backend, backendConfigured } from "@/data/backend";
 import { getFeaturedEvent } from "@/lib/events";
 import { cn } from "@/lib/cn";
+import { adminAuth, sessionAal } from "@/components/admin/admin-auth";
 import {
   doorAuth,
   doorCall,
   DoorAuthError,
+  setDoorSessionSource,
+  signOutDoor,
+  staffSessionReady,
+  type DoorIdentity,
+  type DoorSessionSource,
   type DoorStats,
   type GuestOrder,
   type ScanResult,
@@ -21,26 +26,89 @@ const SAME_CODE_GRACE_MS = 6000;
 const ADMIT_DISMISS_MS = 1600;
 
 /**
- * Door staff console: shared login → live counts → camera scanner, plus a
- * guest list for manual check-in. Every decision is made server-side; this
- * page only displays the verdict.
+ * Door staff console. An existing privileged aal2 session opens the scanner.
+ * Otherwise the operator signs in here. The server, not this page, decides
+ * whether that session may scan.
  */
 export function DoorApp() {
-  const [session, setSession] = useState<Session | null | undefined>(undefined);
+  const [phase, setPhase] = useState<"loading" | "login" | "mfa" | "ready">("loading");
+  const [source, setSource] = useState<DoorSessionSource | null>(null);
+  const [identity, setIdentity] = useState("");
+  const [armSetup, setArmSetup] = useState(false);
+
+  const openScanner = useCallback((next: DoorSessionSource, email: string) => {
+    setDoorSessionSource(next);
+    setSource(next);
+    setIdentity(email);
+    setPhase("ready");
+  }, []);
 
   useEffect(() => {
     if (!backendConfigured) return;
-    const auth = doorAuth().auth;
-    auth.getSession().then(({ data }) => setSession(data.session));
-    const { data } = auth.onAuthStateChange((_e, s) => setSession(s));
+    let cancel = false;
+    (async () => {
+      await doorAuth().auth.signOut();
+      const staff = (await adminAuth().auth.getSession()).data.session;
+      if (cancel) return;
+      if (staff) {
+        if (staffSessionReady(staff)) openScanner("staff", staff.user.email ?? "");
+        else {
+          setDoorSessionSource("staff");
+          setSource("staff");
+          setIdentity(staff.user.email ?? "");
+          setPhase("mfa");
+        }
+        return;
+      }
+      if (!cancel) setPhase("login");
+    })();
+    return () => {
+      cancel = true;
+    };
+  }, [openScanner]);
+
+  useEffect(() => {
+    if (phase !== "ready" || !source) return;
+    const client = source === "staff" ? adminAuth() : doorAuth();
+    const { data } = client.auth.onAuthStateChange((event) => {
+      if (event === "SIGNED_OUT") {
+        setDoorSessionSource(null);
+        setSource(null);
+        setIdentity("");
+        setPhase("login");
+      }
+    });
     return () => data.subscription.unsubscribe();
-  }, []);
+  }, [phase, source]);
 
   if (!backendConfigured) {
     return <Centered title="Door not set up" body="The ticketing backend isn't configured on this build yet." />;
   }
-  if (session === undefined) return <Centered title="Loading…" />;
-  if (!session) return <DoorLogin />;
+  if (phase === "loading") return <Centered title="Loading…" />;
+  if (phase !== "ready") {
+    return (
+      <DoorLogin
+        phase={phase}
+        identity={identity}
+        armSetup={armSetup}
+        onReady={openScanner}
+        onNeedsMfa={(email) => {
+          setArmSetup(true);
+          setDoorSessionSource("staff");
+          setSource("staff");
+          setIdentity(email);
+          setPhase("mfa");
+        }}
+        onCancel={async () => {
+          setArmSetup(false);
+          await signOutDoor();
+          setSource(null);
+          setIdentity("");
+          setPhase("login");
+        }}
+      />
+    );
+  }
   return <DoorConsole />;
 }
 
@@ -53,20 +121,122 @@ function Centered({ title, body }: { title: string; body?: string }) {
   );
 }
 
-function DoorLogin() {
+function DoorLogin({
+  phase,
+  identity,
+  armSetup,
+  onReady,
+  onNeedsMfa,
+  onCancel,
+}: {
+  phase: "login" | "mfa";
+  identity: string;
+  armSetup: boolean;
+  onReady: (source: DoorSessionSource, email: string) => void;
+  onNeedsMfa: (email: string) => void;
+  onCancel: () => Promise<void>;
+}) {
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [device, setDevice] = useState(() => (typeof window === "undefined" ? "" : localStorage.getItem(DEVICE_KEY) ?? ""));
+  const [code, setCode] = useState("");
+  const [factorId, setFactorId] = useState<string | null>(null);
+  const [challengeId, setChallengeId] = useState<string | null>(null);
+  const [qr, setQr] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (phase !== "mfa") return;
+    let cancel = false;
+    (async () => {
+      const factors = await adminAuth().auth.mfa.listFactors();
+      const totp = factors.data?.totp?.[0];
+      if (cancel) return;
+      if (!totp) {
+        if (!armSetup) {
+          setError("This account needs an authenticator. Sign in again to set it up.");
+          return;
+        }
+        const enrolled = await adminAuth().auth.mfa.enroll({ factorType: "totp", friendlyName: "One More door" });
+        if (cancel) return;
+        if (enrolled.error || !enrolled.data) {
+          setError("Could not start authenticator setup.");
+          return;
+        }
+        setFactorId(enrolled.data.id);
+        setQr(enrolled.data.totp.qr_code);
+        return;
+      }
+      setFactorId(totp.id);
+      const challenge = await adminAuth().auth.mfa.challenge({ factorId: totp.id });
+      if (!cancel && challenge.data) setChallengeId(challenge.data.id);
+    })();
+    return () => {
+      cancel = true;
+    };
+  }, [armSetup, phase]);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
     setError(null);
     localStorage.setItem(DEVICE_KEY, device.trim());
-    const { error } = await doorAuth().auth.signInWithPassword({ email: backend.doorEmail, password });
+    const attempted = email.trim().toLowerCase();
+    const legacy = attempted === backend.doorEmail.toLowerCase();
+    const client = legacy ? doorAuth() : adminAuth();
+    const { data, error: signError } = await client.auth.signInWithPassword({ email: attempted, password });
+    setPassword("");
+    if (signError || !data.session) {
+      setError("Sign-in failed.");
+      setBusy(false);
+      return;
+    }
+    const signedIn = data.session.user.email ?? attempted;
+    if (legacy) {
+      onReady("door", signedIn);
+      setBusy(false);
+      return;
+    }
+    if (sessionAal(data.session.access_token) === "aal2") {
+      onReady("staff", signedIn);
+      setBusy(false);
+      return;
+    }
     setBusy(false);
-    if (error) setError(error.message === "Invalid login credentials" ? "Wrong password." : error.message);
+    onNeedsMfa(signedIn);
+  }
+
+  async function verify(e: FormEvent) {
+    e.preventDefault();
+    if (!factorId) return;
+    setBusy(true);
+    setError(null);
+    let currentChallenge = challengeId;
+    if (!currentChallenge) {
+      const challenge = await adminAuth().auth.mfa.challenge({ factorId });
+      if (challenge.error || !challenge.data) {
+        setError("Could not start verification.");
+        setBusy(false);
+        return;
+      }
+      currentChallenge = challenge.data.id;
+      setChallengeId(currentChallenge);
+    }
+    const verified = await adminAuth().auth.mfa.verify({ factorId, challengeId: currentChallenge, code });
+    if (verified.error) {
+      setError("That code was not accepted.");
+      setBusy(false);
+      return;
+    }
+    const session = (await adminAuth().auth.getSession()).data.session;
+    if (!session || sessionAal(session.access_token) !== "aal2") {
+      setError("Authenticator verification is required.");
+      setBusy(false);
+      return;
+    }
+    onReady("staff", session.user.email ?? identity);
+    setBusy(false);
   }
 
   const field =
@@ -74,30 +244,67 @@ function DoorLogin() {
 
   return (
     <main className="flex min-h-dvh flex-col justify-center px-6">
-      <form onSubmit={submit} className="mx-auto w-full max-w-sm">
+      <form onSubmit={phase === "mfa" ? verify : submit} className="mx-auto w-full max-w-sm">
         <p className="eyebrow text-[0.6rem] tracking-[0.3em] text-gold">The One More Company</p>
         <h1 className="mt-3 font-display text-5xl">Door</h1>
-        <label className="mt-8 block">
-          <span className="eyebrow text-[0.6rem] text-ivory-muted">Door password</span>
-          <input
-            type="password"
-            autoComplete="current-password"
-            className={field}
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-          />
-        </label>
-        <label className="mt-5 block">
-          <span className="eyebrow text-[0.6rem] text-ivory-muted">This phone (optional)</span>
-          <input
-            className={field}
-            placeholder="e.g. Front door — Vinay"
-            value={device}
-            maxLength={40}
-            onChange={(e) => setDevice(e.target.value)}
-          />
-        </label>
+        {phase === "mfa" ? (
+          <>
+            <p className="mt-4 text-sm text-ivory-muted">
+              Authenticator required{identity ? ` for ${identity}` : ""}.
+            </p>
+            {qr && (
+              <object data={qr} type="image/svg+xml" aria-label="Authenticator setup QR" className="mt-6 size-44 bg-white p-2">
+                Authenticator setup code
+              </object>
+            )}
+            <label className="mt-6 block">
+              <span className="eyebrow text-[0.6rem] text-ivory-muted">Authenticator code</span>
+              <input
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                className={field}
+                value={code}
+                onChange={(e) => setCode(e.target.value)}
+                required
+              />
+            </label>
+          </>
+        ) : (
+          <>
+            <label className="mt-8 block">
+              <span className="eyebrow text-[0.6rem] text-ivory-muted">Email</span>
+              <input
+                type="email"
+                autoComplete="username"
+                className={field}
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+              />
+            </label>
+            <label className="mt-5 block">
+              <span className="eyebrow text-[0.6rem] text-ivory-muted">Password</span>
+              <input
+                type="password"
+                autoComplete="current-password"
+                className={field}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+              />
+            </label>
+            <label className="mt-5 block">
+              <span className="eyebrow text-[0.6rem] text-ivory-muted">This phone (optional)</span>
+              <input
+                className={field}
+                placeholder="e.g. Front door — Vinay"
+                value={device}
+                maxLength={40}
+                onChange={(e) => setDevice(e.target.value)}
+              />
+            </label>
+          </>
+        )}
         {error && (
           <p role="alert" className="mt-4 text-sm text-red-400">
             {error}
@@ -105,17 +312,30 @@ function DoorLogin() {
         )}
         <button
           type="submit"
-          disabled={busy || !password}
+          disabled={busy || (phase === "mfa" ? !code : !email || !password)}
           className="mt-8 h-14 w-full rounded-md bg-gold text-sm font-semibold uppercase tracking-[0.2em] text-rich disabled:opacity-50"
         >
-          {busy ? "Signing in…" : "Start scanning"}
+          {busy ? "Checking…" : phase === "mfa" ? "Verify" : "Continue"}
         </button>
+        {phase === "mfa" && (
+          <button type="button" className="mt-4 w-full text-sm text-ivory/50" onClick={() => void onCancel()}>
+            Cancel and sign out
+          </button>
+        )}
       </form>
     </main>
   );
 }
 
+const ROLE_LABEL: Record<NonNullable<DoorIdentity["role"]>, string> = {
+  super_admin: "Super admin",
+  admin: "Admin",
+  door_staff: "Door staff",
+  legacy: "Door",
+};
+
 function DoorConsole() {
+  const [who, setWho] = useState<DoorIdentity | null>(null);
   const event = getFeaturedEvent();
   const [tab, setTab] = useState<"scan" | "guests">("scan");
   const [stats, setStats] = useState<DoorStats | null>(null);
@@ -126,10 +346,15 @@ function DoorConsole() {
   const refreshStats = useCallback(async () => {
     if (!eventId) return;
     try {
-      setStats(await doorCall<DoorStats>({ action: "stats", eventId }));
+      const [nextStats, nextWho] = await Promise.all([
+        doorCall<DoorStats>({ action: "stats", eventId }),
+        doorCall<DoorIdentity>({ action: "session" }),
+      ]);
+      setStats(nextStats);
+      setWho(nextWho);
       setOffline(false);
     } catch (err) {
-      if (err instanceof DoorAuthError) await doorAuth().auth.signOut();
+      if (err instanceof DoorAuthError) await signOutDoor();
       else setOffline(true);
     }
   }, [eventId]);
@@ -150,6 +375,13 @@ function DoorConsole() {
       <header className="flex items-center justify-between gap-3 px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
         <div className="min-w-0">
           <p className="truncate text-[0.62rem] font-semibold uppercase tracking-[0.24em] text-gold">{event.name}</p>
+          <p className="mt-1 text-[0.58rem] font-semibold uppercase tracking-[0.16em] text-ivory/40">Signed in as</p>
+          <p className="truncate text-[0.72rem] text-ivory">{who?.email ?? "Checking identity…"}</p>
+          {who?.role && (
+            <p className="truncate text-[0.58rem] font-semibold uppercase tracking-[0.16em] text-gold/80">
+              Role · {ROLE_LABEL[who.role]}
+            </p>
+          )}
           <p className="mt-0.5 font-display text-3xl leading-none">
             {stats ? stats.inside : "–"}
             <span className="text-lg text-ivory/50"> / {stats ? stats.guests : "–"} inside</span>
@@ -157,7 +389,7 @@ function DoorConsole() {
         </div>
         <button
           type="button"
-          onClick={() => doorAuth().auth.signOut()}
+          onClick={() => void signOutDoor()}
           className="shrink-0 rounded-md border border-ivory/20 px-3 py-2 text-[0.62rem] font-semibold uppercase tracking-[0.18em] text-ivory/70"
         >
           Sign out
@@ -233,7 +465,7 @@ function Scanner({ eventId, onScanned }: { eventId: string; onScanned: () => voi
         onScanned();
       } catch (err) {
         if (err instanceof DoorAuthError) {
-          await doorAuth().auth.signOut();
+          await signOutDoor();
           return;
         }
         feedback(false);
@@ -280,11 +512,11 @@ function Scanner({ eventId, onScanned }: { eventId: string; onScanned: () => voi
 }
 
 const VERDICTS = {
-  admitted: { bg: "bg-emerald-600", title: "Admit" },
-  "already-used": { bg: "bg-amber-500", title: "Already in" },
-  cancelled: { bg: "bg-red-600", title: "Refunded" },
+  admitted: { bg: "bg-emerald-600", title: "Valid" },
+  "already-used": { bg: "bg-amber-500", title: "Already used" },
+  cancelled: { bg: "bg-red-600", title: "Cancelled" },
   "wrong-event": { bg: "bg-red-600", title: "Wrong event" },
-  "not-found": { bg: "bg-red-600", title: "Invalid ticket" },
+  "not-found": { bg: "bg-red-600", title: "Invalid" },
   error: { bg: "bg-zinc-700", title: "No connection" },
 } as const;
 
@@ -304,8 +536,11 @@ function Verdict({ result, onDismiss }: { result: ScanResult | { outcome: "error
       <span className="font-display text-7xl leading-none">{v.title}</span>
       {r && r.outcome === "admitted" && (
         <span className="mt-5 text-lg font-semibold">
-          {r.tier_name}
-          {r.guest_count && r.guest_count > 1 ? ` · guest ${r.guest_number} of ${r.guest_count}` : ""}
+          Check-in successful
+          <span className="mt-1 block text-base font-normal">
+            {r.tier_name}
+            {r.guest_count && r.guest_count > 1 ? ` · guest ${r.guest_number} of ${r.guest_count}` : ""}
+          </span>
         </span>
       )}
       {r?.purchaser_name && <span className="mt-1 text-base opacity-90">{r.purchaser_name}</span>}
@@ -362,7 +597,11 @@ function Guests({ eventId, onAdmitted }: { eventId: string; onAdmitted: () => vo
       setMessage(r.outcome === "admitted" ? "Admitted." : `Not admitted: ${VERDICTS[r.outcome].title.toLowerCase()}.`);
       onAdmitted();
       await search(q);
-    } catch {
+    } catch (err) {
+      if (err instanceof DoorAuthError) {
+        await signOutDoor();
+        return;
+      }
       setMessage("Couldn't admit — check connection.");
     } finally {
       setBusyId(null);

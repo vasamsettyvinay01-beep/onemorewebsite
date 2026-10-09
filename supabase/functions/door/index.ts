@@ -1,12 +1,18 @@
-// Door staff API for the /door scanner. Requires a Supabase Auth session for
-// an email listed in DOOR_EMAILS (the shared door login).
+// Door staff API for the /door scanner.
 //
+// A caller is authorized only after the Supabase session is validated here.
+// Staff role is read from staff_roles. Request body, query string, and browser
+// storage cannot grant access. Admin and super_admin also need aal2.
+// The legacy door login remains allowed until it is retired.
+//
+// POST { action: "session" }                                server-resolved email and role
 // POST { action: "scan",   eventId, token, device? }
 // POST { action: "admit",  eventId, ticketId, device? }   manual check-in from the guest list
 // POST { action: "stats",  eventId }
 // POST { action: "search", eventId, q }
 
 import { admin, corsHeaders, json } from "../_shared/http.ts";
+import { canUseScanner, resolveRole } from "../_shared/staff-auth.mjs";
 
 const DOOR_EMAILS = (Deno.env.get("DOOR_EMAILS") ?? "")
   .split(",")
@@ -23,7 +29,30 @@ Deno.serve(async (req) => {
   if (!jwt) return json(req, { error: "Sign in required" }, 401);
   const { data: auth } = await admin.auth.getUser(jwt);
   const staff = auth.user?.email?.toLowerCase();
-  if (!staff || !DOOR_EMAILS.includes(staff)) return json(req, { error: "Not door staff" }, 403);
+  const legacyDoor = Boolean(staff && DOOR_EMAILS.includes(staff));
+  const roleLookup = !legacyDoor && auth.user
+    ? await admin.from("staff_roles").select("role").eq("user_id", auth.user.id).maybeSingle()
+    : null;
+  const role = roleLookup && !roleLookup.error ? resolveRole(roleLookup.data?.role) : null;
+  const allowed = canUseScanner({ role, aal: jwtAal(jwt), legacyDoor });
+  if (!staff || !allowed) {
+    try {
+      await admin.rpc("record_audit", {
+        p_actor_id: auth.user?.id ?? null,
+        p_actor_role: role ?? null,
+        p_action: "door_login_rejected",
+        p_resource_type: "door",
+        p_resource_id: null,
+        p_summary: staff ? { email: staff } : {},
+        p_ip: (req.headers.get("x-forwarded-for") ?? "").slice(0, 64),
+        p_user_agent: (req.headers.get("user-agent") ?? "").slice(0, 200),
+      });
+    } catch {
+      // A missing audit function must not turn a rejection into a server error.
+    }
+    const needsMfa = role === "admin" || role === "super_admin";
+    return json(req, { error: needsMfa ? "Multi-factor authentication is required." : "Not door staff" }, 403);
+  }
 
   let body: Record<string, unknown>;
   try {
@@ -31,6 +60,11 @@ Deno.serve(async (req) => {
   } catch {
     return json(req, { error: "Bad request" }, 400);
   }
+  if (body.action === "session") {
+    if (!(await allow(`session:${staff}`, 60))) return json(req, { error: "Please wait a moment and try again." }, 429);
+    return json(req, { email: staff, role: legacyDoor ? "legacy" : role });
+  }
+
   const eventId = typeof body.eventId === "string" ? body.eventId : "";
   const device = typeof body.device === "string" ? body.device.slice(0, 40) : null;
   if (!eventId) return json(req, { error: "eventId required" }, 400);
@@ -107,6 +141,15 @@ Deno.serve(async (req) => {
     return json(req, { error: "Server error" }, 500);
   }
 });
+
+function jwtAal(jwt: string): string {
+  try {
+    const payload = JSON.parse(atob(jwt.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
+    return typeof payload.aal === "string" ? payload.aal : "aal1";
+  } catch {
+    return "aal1";
+  }
+}
 
 async function allow(bucket: string, limit: number): Promise<boolean> {
   const { data, error } = await admin.rpc("allow_request", {

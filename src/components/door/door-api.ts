@@ -1,14 +1,26 @@
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { createClient, type Session, type SupabaseClient } from "@supabase/supabase-js";
 import { backend, functionUrl } from "@/data/backend";
+import { adminAuth, sessionAal } from "@/components/admin/admin-auth";
 
 let client: SupabaseClient | null = null;
+let activeSource: DoorSessionSource | null = null;
 
-/** Browser auth client — only used for the shared door login session. */
+export type DoorSessionSource = "staff" | "door";
+
+/** Legacy scanner session. Privileged staff sessions stay in the operations client. */
 export function doorAuth(): SupabaseClient {
   client ??= createClient(backend.supabaseUrl, backend.supabaseKey, {
     auth: { persistSession: true, autoRefreshToken: true, storageKey: "omc-door" },
   });
   return client;
+}
+
+export function setDoorSessionSource(source: DoorSessionSource | null) {
+  activeSource = source;
+}
+
+function activeClient(): SupabaseClient {
+  return activeSource === "staff" ? adminAuth() : doorAuth();
 }
 
 export type ScanOutcome = "admitted" | "already-used" | "cancelled" | "wrong-event" | "not-found";
@@ -41,8 +53,12 @@ export interface GuestOrder {
 
 export class DoorAuthError extends Error {}
 
+export function staffSessionReady(session: Session): boolean {
+  return sessionAal(session.access_token) === "aal2";
+}
+
 export async function doorCall<T>(body: Record<string, unknown>): Promise<T> {
-  const { data } = await doorAuth().auth.getSession();
+  const { data } = await activeClient().auth.getSession();
   const token = data.session?.access_token;
   if (!token) throw new DoorAuthError("Signed out");
   const res = await fetch(functionUrl("door"), {
@@ -53,4 +69,15 @@ export async function doorCall<T>(body: Record<string, unknown>): Promise<T> {
   if (res.status === 401 || res.status === 403) throw new DoorAuthError("Not authorised");
   if (!res.ok) throw new Error(`Door API ${res.status}`);
   return res.json();
+}
+
+export interface DoorIdentity {
+  email: string;
+  role: "super_admin" | "admin" | "door_staff" | "legacy" | null;
+}
+
+/** Ends the scanner session and any saved legacy door login. */
+export async function signOutDoor() {
+  activeSource = null;
+  await Promise.all([adminAuth().auth.signOut(), doorAuth().auth.signOut()]);
 }
