@@ -380,7 +380,7 @@ function CheckoutCard({ event, initialTier }: { event: OneMoreEvent; initialTier
                 options={{
                   layout: "tabs",
                   wallets: { applePay: "auto", googlePay: "auto", link: "never" },
-                  fields: { billingDetails: { name: "never", email: "never", address: "never" } },
+                  fields: { billingDetails: { name: "never", email: "never", address: "if_required" } },
                   terms: { card: "never" },
                 }}
               />
