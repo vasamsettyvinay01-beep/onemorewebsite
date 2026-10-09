@@ -22,7 +22,8 @@ export function getVisibleTiers(event: OneMoreEvent): TicketTier[] {
   return event.ticketTiers.filter((t) => {
     if (t.hidden) return false;
     if (!t.opensAfter) return true;
-    return event.ticketTiers.find((o) => o.id === t.opensAfter)?.soldOut ?? true;
+    const gate = event.ticketTiers.find((o) => o.id === t.opensAfter);
+    return gate ? !!gate.soldOut : true;
   });
 }
 

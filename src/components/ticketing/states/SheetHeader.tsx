@@ -6,15 +6,18 @@ export function SheetHeader({
   event,
   eyebrow,
   omitPlace = false,
+  compact = false,
 }: {
   event: OneMoreEvent;
   eyebrow: string;
   /** Leave the venue out when the caller shows it on its own line. */
   omitPlace?: boolean;
+  /** Tighter type so a full price list fits the sheet without scrolling. */
+  compact?: boolean;
 }) {
   const facts = getEventFacts(event).filter((f) => !(omitPlace && f.label === "WHERE"));
   return (
-    <header aria-hidden className="px-6 pt-5 sm:px-8 md:px-10 md:pt-0">
+    <header aria-hidden className="px-6 pt-4 sm:px-8 md:px-8 md:pt-0">
       <p className="eyebrow flex items-center gap-3 text-(--ev-accent)">
         {event.chapter !== undefined && (
           <>
@@ -24,9 +27,11 @@ export function SheetHeader({
         )}
         <span>{eyebrow}</span>
       </p>
-      <p className="font-display mt-3 text-[2.25rem] leading-[0.92] text-ivory md:text-[2.75rem]">{event.name}</p>
+      <p className={compact ? "mt-2 font-display text-[1.85rem] leading-[0.92] text-ivory md:text-[2.15rem]" : "mt-3 font-display text-[2.25rem] leading-[0.92] text-ivory md:text-[2.75rem]"}>
+        {event.name}
+      </p>
       {facts.length > 0 && (
-        <p className="mt-3 text-[0.66rem] uppercase tracking-[0.1em] text-ivory-muted sm:text-[0.7rem] sm:tracking-[0.16em]">
+        <p className="mt-2 text-[0.62rem] uppercase tracking-[0.12em] text-ivory-muted sm:text-[0.68rem] sm:tracking-[0.14em]">
           {facts.map((f) => f.value).join("  ·  ")}
         </p>
       )}

@@ -124,7 +124,8 @@ export const events: OneMoreEvent[] = [
     // Selling: run `npm run stripe:setup` after any tier change (it syncs prices to the backend),
     // then set status: "on-sale".
     ticketTiers: [
-      // Early Bird closes itself once `capacity` passes have sold.
+      // Early Bird is the only pass on sale until its 10 are gone. It stays
+      // listed as sold out, and the other passes open at that moment.
       {
         id: "early-bird",
         name: "Early Bird",
@@ -137,12 +138,14 @@ export const events: OneMoreEvent[] = [
         name: "Female",
         priceCents: 1799,
         currency: "USD",
+        opensAfter: "early-bird",
       },
       {
         id: "general",
         name: "General Admission",
         priceCents: 1999,
         currency: "USD",
+        opensAfter: "early-bird",
       },
       {
         id: "couple",
@@ -150,6 +153,7 @@ export const events: OneMoreEvent[] = [
         priceCents: 2999,
         currency: "USD",
         admits: 2,
+        opensAfter: "early-bird",
       },
       {
         id: "group",
@@ -157,6 +161,7 @@ export const events: OneMoreEvent[] = [
         priceCents: 8999,
         currency: "USD",
         admits: 5,
+        opensAfter: "early-bird",
       },
       {
         id: "group-8",
@@ -164,6 +169,7 @@ export const events: OneMoreEvent[] = [
         priceCents: 13999,
         currency: "USD",
         admits: 8,
+        opensAfter: "early-bird",
       },
       { id: "vip", name: "VIP", priceCents: 0, currency: "USD", priceOnRequest: true, hidden: true },
     ],

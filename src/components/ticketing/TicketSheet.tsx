@@ -60,15 +60,12 @@ export function TicketSheet({ open, event: staticEvent, onClose }: TicketSheetPr
           "radial-gradient(60% 50% at 50% 100%, color-mix(in srgb, var(--ev-primary) 70%, transparent), transparent)",
       }}
     >
-      {/* sized to the viewport so the whole sheet is visible without scrolling */}
       <div
         style={themeStyle}
-        className="flex max-h-[92dvh] flex-col overflow-y-auto md:grid md:h-[min(37rem,calc(100dvh-3rem))] md:max-h-none md:grid-cols-2 md:overflow-hidden"
+        className="flex max-h-[92dvh] flex-col overflow-hidden md:grid md:h-[min(38rem,calc(100dvh-2.5rem))] md:max-h-[calc(100dvh-2.5rem)] md:grid-cols-2"
       >
         <TicketArtwork event={event} />
-        <div className="relative flex shrink-0 flex-col md:min-h-0 md:overflow-y-auto">
-          <div className="md:my-auto md:py-7">{content}</div>
-        </div>
+        <div className="flex h-full min-h-0 flex-col px-0 py-4 md:py-6 md:pb-8 md:pl-2 md:pr-8">{content}</div>
       </div>
       <button
         type="button"

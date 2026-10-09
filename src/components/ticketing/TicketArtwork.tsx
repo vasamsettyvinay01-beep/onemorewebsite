@@ -17,7 +17,7 @@ export function TicketArtwork({ event }: { event: OneMoreEvent }) {
 
   return (
     // on mobile the artwork gives up height first so the panel below always fits
-    <div className="relative min-h-32 shrink basis-[48dvh] overflow-hidden max-md:max-h-[100vw] md:h-full">
+    <div className="relative h-[9.5rem] shrink-0 overflow-hidden sm:h-[11rem] md:h-full md:min-h-0">
       {art.src ? (
         <motion.div
           className="absolute inset-0"

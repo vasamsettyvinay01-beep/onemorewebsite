@@ -16,44 +16,47 @@ import type { OneMoreEvent, TicketTier } from "@/types/event";
 const stripePromise = backend.stripeKey ? loadStripe(backend.stripeKey) : null;
 
 const GOLD = "#BB9B63";
-const INK = "#0B0B0A";
+const IVORY = "#ECEAE4";
+const RICH = "#0F100F";
+const FIELD = "#161715";
 
 const appearance: Appearance = {
   theme: "night",
   variables: {
     colorPrimary: GOLD,
-    colorBackground: "#121210",
-    colorText: "#ECEAE4",
-    colorTextSecondary: "rgba(236,234,228,0.5)",
-    colorTextPlaceholder: "rgba(236,234,228,0.26)",
-    colorDanger: "#E58A6E",
-    colorIcon: "rgba(236,234,228,0.5)",
+    colorBackground: FIELD,
+    colorText: IVORY,
+    colorTextSecondary: "rgba(236,234,228,0.62)",
+    colorTextPlaceholder: "rgba(236,234,228,0.32)",
+    colorDanger: "#E7A598",
+    colorIcon: "rgba(236,234,228,0.62)",
     fontFamily: "Manrope, 'Helvetica Neue', Arial, sans-serif",
-    fontSizeBase: "13px",
-    borderRadius: "3px",
+    fontSizeBase: "14px",
+    borderRadius: "2px",
     spacingUnit: "2px",
     gridRowSpacing: "8px",
   },
   rules: {
     ".Input": {
-      backgroundColor: "rgba(255,255,255,0.025)",
-      border: "1px solid rgba(187,155,99,0.22)",
+      backgroundColor: "rgba(255,255,255,0.03)",
+      border: "1px solid rgba(236,234,228,0.16)",
       boxShadow: "none",
-      padding: "8px 10px",
+      padding: "9px 12px",
+      color: IVORY,
     },
-    ".Input:hover": { border: "1px solid rgba(187,155,99,0.4)" },
-    ".Input:focus": { border: `1px solid ${GOLD}`, boxShadow: "0 0 0 3px rgba(187,155,99,0.14)" },
-    ".Input--invalid": { border: "1px solid #E58A6E", boxShadow: "none" },
+    ".Input:hover": { border: "1px solid rgba(187,155,99,0.45)" },
+    ".Input:focus": { border: `1px solid ${GOLD}`, boxShadow: "none" },
+    ".Input--invalid": { border: "1px solid #E7A598", boxShadow: "none" },
     ".Label": {
       fontSize: "10px",
       fontWeight: "600",
-      letterSpacing: "0.24em",
+      letterSpacing: "0.16em",
       textTransform: "uppercase",
-      color: "rgba(236,234,228,0.45)",
-      marginBottom: "4px",
+      color: "rgba(236,234,228,0.5)",
+      marginBottom: "6px",
     },
-    ".Tab": { border: "1px solid rgba(187,155,99,0.22)", boxShadow: "none" },
-    ".Tab--selected": { border: `1px solid ${GOLD}`, color: "#ECEAE4" },
+    ".Tab": { border: "1px solid rgba(236,234,228,0.16)", boxShadow: "none", color: IVORY, backgroundColor: RICH },
+    ".Tab--selected": { border: `1px solid ${GOLD}`, color: IVORY, backgroundColor: FIELD },
     ".Error": { fontSize: "12px" },
   },
 };
@@ -74,31 +77,55 @@ export function CheckoutView() {
   const staticEvent = getEventBySlug(params.get("event") ?? "") ?? null;
   const event = useLiveEvent(staticEvent, true);
   const open = !!event && backendConfigured && !!stripePromise && isOnSale(event);
-  const art = event?.checkoutArtwork ?? event?.ticketArtwork ?? event?.artwork;
+
+  const date = event ? longDate(event) : undefined;
+  const when = [date?.replace(/, \d{4}$/, ""), event ? formatEventTime(event) : undefined].filter(Boolean).join(" · ");
 
   return (
-    <main className="fixed inset-0 overflow-hidden bg-[#070706] text-ivory">
-      {art?.src && (
-        <div aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-[26rem] lg:inset-0 lg:h-auto">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={art.src} alt="" className="size-full object-cover object-[86%_50%] lg:object-[70%_50%]" />
-          <div className="absolute inset-0 bg-linear-to-b from-[#070706]/10 via-[#070706]/55 to-[#070706] lg:bg-linear-to-r lg:from-[#070706]/80 lg:via-[#070706]/20 lg:to-[#070706]/40" />
-          <div className="absolute inset-0 hidden bg-linear-to-t from-[#070706] via-transparent to-[#070706]/40 lg:block" />
-        </div>
-      )}
-
-      <div className="relative mx-auto flex h-full max-w-[78rem] flex-col px-4 sm:px-6 lg:px-10">
-        <TopBar />
-        {event && open ? (
-          <div className="grid min-h-0 flex-1 content-center items-center gap-3 pb-3 pt-1 lg:grid-cols-[minmax(0,1fr)_25.5rem] lg:gap-12 lg:pb-4">
-            <EventIntro event={event} />
-            <Elements stripe={stripePromise} options={elementsOptions(1)}>
-              <CheckoutCard event={event} initialTier={params.get("tier")} />
-            </Elements>
-          </div>
-        ) : (
-          <Closed event={event} />
+    <main className="fixed inset-0 overflow-hidden bg-rich text-ivory">
+      <div
+        className={cn(
+          "mx-auto flex h-full w-full items-center px-5 py-4 sm:px-8",
+          params.get("tier") ? "max-w-xl" : "max-w-5xl",
         )}
+      >
+        <div className="flex max-h-full w-full flex-col">
+          <header className="shrink-0">
+            <Link href="/" aria-label={brand.name} className="inline-flex">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={brand.logo.sealPath} alt="" width={32} height={32} className="size-8" />
+            </Link>
+            {event && open ? (
+              <>
+                <p className="eyebrow mt-4 flex items-center gap-3 text-gold">
+                  {event.chapter !== undefined && (
+                    <>
+                      <span>{formatChapter(event.chapter, true)}</span>
+                      <span className="h-px w-6 bg-current opacity-60" />
+                    </>
+                  )}
+                  <span>Payment</span>
+                </p>
+                <h1 className="mt-2 font-display text-[2.15rem] leading-[0.92] sm:text-[2.6rem]">{event.name}</h1>
+                <p className="mt-2 text-[0.66rem] uppercase tracking-[0.14em] text-ivory-muted">
+                  {[when, event.venue?.name, event.city, event.minimumAge ? `${event.minimumAge}+` : undefined]
+                    .filter(Boolean)
+                    .join("  ·  ")}
+                </p>
+              </>
+            ) : null}
+          </header>
+
+          {event && open ? (
+            <div className="mt-5 flex min-h-0 flex-col">
+              <Elements stripe={stripePromise} options={elementsOptions(1)}>
+                <CheckoutCard event={event} initialTier={params.get("tier")} />
+              </Elements>
+            </div>
+          ) : (
+            <Closed event={event} />
+          )}
+        </div>
       </div>
     </main>
   );
@@ -115,64 +142,16 @@ function elementsOptions(amount: number): StripeElementsOptions {
   };
 }
 
-function TopBar() {
-  return (
-    <header className="relative z-10 flex shrink-0 items-center justify-between pt-3 lg:pt-4">
-      <Link href="/" className="group flex items-center gap-3" aria-label={`${brand.name} — home`}>
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={brand.logo.sealPath} alt="" width={32} height={32} className="size-8" />
-        <span className="hidden text-[0.56rem] font-semibold uppercase tracking-[0.42em] text-gold sm:block">{brand.name}</span>
-      </Link>
-      <span className="flex items-center gap-2 text-[0.56rem] font-semibold uppercase tracking-[0.32em] text-ivory/55">
-        <LockIcon />
-        Secure checkout
-      </span>
-    </header>
-  );
-}
-
-function EventIntro({ event }: { event: OneMoreEvent }) {
-  const date = longDate(event);
-  const time = formatEventTime(event);
-  const venue = event.venue;
-  return (
-    <section className="lg:max-w-[32rem]">
-      <p className="text-[0.55rem] font-semibold uppercase tracking-[0.38em] text-gold">
-        {event.chapter !== undefined ? formatChapter(event.chapter) : "One More"}
-        {event.city ? ` · ${event.city}` : ""}
-      </p>
-      <h1 className="mt-2 bg-[linear-gradient(176deg,#FFF4D6_0%,#E9D3A1_28%,#C9A96E_52%,#8E6E3F_78%,#D8C196_100%)] bg-clip-text font-display text-[clamp(2.35rem,4.6vw,4.75rem)] leading-[0.88] tracking-[-0.02em] text-transparent">
-        {event.name}
-      </h1>
-      <p className="mt-2 truncate text-[0.72rem] text-ivory/70 lg:hidden">{[date, time, venue?.name].filter(Boolean).join(" · ")}</p>
-      <dl className="mt-5 hidden grid-cols-2 gap-x-8 border-t border-gold/20 sm:max-w-[28rem] lg:grid">
-        <Fact label="Date" value={date ?? "TBA"} />
-        <Fact label="Time" value={time ?? "TBA"} />
-        <Fact label="Venue" value={venue?.name ?? event.city ?? "TBA"} />
-        <Fact label="Entry" value={event.minimumAge ? `${event.minimumAge}+` : "All welcome"} />
-      </dl>
-    </section>
-  );
-}
-
-function Fact({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="border-b border-gold/12 py-2.5">
-      <dt className="text-[0.5rem] font-semibold uppercase tracking-[0.32em] text-ivory/40">{label}</dt>
-      <dd className="mt-1 font-display text-[1.05rem] leading-none text-ivory">{value}</dd>
-    </div>
-  );
-}
-
 function CheckoutCard({ event, initialTier }: { event: OneMoreEvent; initialTier: string | null }) {
   const router = useRouter();
   const stripe = useStripe();
   const elements = useElements();
   const tiers = getVisibleTiers(event).filter((t) => !t.priceOnRequest);
   const buyable = tiers.filter((t) => !t.soldOut);
-  const [tierId, setTierId] = useState(initialTier ?? "");
-  const tier: TicketTier | undefined =
-    buyable.find((t) => t.id === tierId) ?? [...buyable].sort((a, b) => a.priceCents - b.priceCents)[0];
+  const chosen = buyable.find((t) => t.id === initialTier);
+  const [tierId, setTierId] = useState(chosen?.id ?? "");
+  const tier: TicketTier | undefined = chosen ?? buyable.find((t) => t.id === tierId) ?? [...buyable].sort((a, b) => a.priceCents - b.priceCents)[0];
+  const locked = !!chosen;
   const [quantity, setQuantity] = useState(1);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -267,147 +246,159 @@ function CheckoutCard({ event, initialTier }: { event: OneMoreEvent; initialTier
   }
 
   const field =
-    "h-9 w-full rounded-[3px] border border-gold/22 bg-white/[0.025] px-2.5 text-[13px] text-ivory placeholder:text-ivory/25 transition-[border-color,box-shadow] hover:border-gold/40 focus:border-gold focus:shadow-[0_0_0_3px_rgba(187,155,99,0.14)] focus:outline-none";
+    "h-10 w-full rounded-[2px] border border-ivory/15 bg-white/[0.03] px-3 text-sm text-ivory placeholder:text-ivory/30 transition-colors hover:border-gold/40 focus:border-gold focus:outline-none";
+
+  const label = "mb-1.5 block text-[0.62rem] font-semibold uppercase tracking-[0.16em] text-ivory/50";
 
   return (
-    <form
-      onSubmit={payByCard}
-      noValidate
-      className="relative overflow-hidden rounded-[6px] border border-gold/25 bg-[#0C0C0B]/72 shadow-[0_70px_140px_-50px_rgba(0,0,0,0.95),inset_0_1px_0_rgba(255,255,255,0.07)] backdrop-blur-2xl"
-    >
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-0 bg-[linear-gradient(140deg,rgba(255,244,214,0.09)_0%,transparent_32%,transparent_70%,rgba(187,155,99,0.07)_100%)]"
-      />
-      <div aria-hidden className="absolute inset-x-10 top-0 h-px bg-linear-to-r from-transparent via-gold to-transparent" />
-
-      <div className="relative px-4 pb-4 pt-4 sm:px-5">
-        <div className="flex items-baseline justify-between gap-3">
-          <p className="font-display text-[1.35rem] leading-none text-ivory">Reserve your pass</p>
-          <p className="shrink-0 text-[0.48rem] font-semibold uppercase tracking-[0.28em] text-gold/80">{event.name}</p>
-        </div>
-
-        <div role="radiogroup" aria-label="Admission" className="mt-2.5 flex flex-col gap-1">
-          {tiers.map((t) => {
-            const selected = t.id === tier.id;
-            const gone = !!t.soldOut;
-            return (
-              <button
-                key={t.id}
-                type="button"
-                role="radio"
-                aria-checked={selected}
-                disabled={gone || busy}
-                onClick={() => setTierId(t.id)}
-                className={cn(
-                  "flex items-center justify-between gap-3 rounded-[3px] border px-3 py-1.5 text-left transition-[border-color,background-color]",
-                  selected
-                    ? "border-gold/80 bg-[linear-gradient(120deg,rgba(187,155,99,0.16),rgba(187,155,99,0.04))]"
-                    : "border-ivory/10 bg-white/[0.015] hover:border-gold/40",
-                  gone && "cursor-not-allowed opacity-40",
-                )}
-              >
-                <span className="flex items-center gap-3">
-                  <span
-                    aria-hidden
-                    className={cn("flex size-3.5 items-center justify-center rounded-full border", selected ? "border-gold" : "border-ivory/25")}
+    <form onSubmit={payByCard} noValidate className="relative flex flex-col">
+      <div className="relative px-1 pt-2">
+        <div className={cn("grid items-start gap-4", !locked && "lg:grid-cols-2 lg:gap-x-12")}>
+          <div>
+            {locked ? (
+              <div className="flex items-end justify-between gap-4 border-y border-ivory/10 py-3">
+                <span>
+                  <span className="eyebrow text-ivory/45">Your pass</span>
+                  <span className="mt-1 block text-sm uppercase tracking-[0.18em]">{tier.name}</span>
+                  <span className="mt-0.5 block text-[0.68rem] text-ivory/45">
+                    {(tier.admits ?? 1) > 1 ? `Admits ${tier.admits}` : "Admits one"}
+                  </span>
+                </span>
+                <span className="font-display text-[1.7rem] leading-none">{formatMoney(tier.priceCents, tier.currency)}</span>
+              </div>
+            ) : (
+            <div role="radiogroup" aria-label="Admission" className="divide-y divide-ivory/10 border-y border-ivory/10">
+              {tiers.map((t) => {
+                const selected = t.id === tier.id;
+                const gone = !!t.soldOut;
+                return (
+                  <button
+                    key={t.id}
+                    type="button"
+                    role="radio"
+                    aria-checked={selected}
+                    disabled={gone || busy}
+                    onClick={() => setTierId(t.id)}
+                    className={cn(
+                      "flex w-full items-center justify-between gap-3 px-1 py-2 text-left transition-colors sm:py-2.5",
+                      selected ? "bg-gold/10" : "hover:bg-white/[0.03]",
+                      gone && "cursor-not-allowed opacity-40",
+                    )}
                   >
-                    {selected && <span className="size-1.5 rounded-full bg-gold" />}
-                  </span>
-                  <span>
-                    <span className="block text-[0.64rem] font-semibold uppercase tracking-[0.16em] text-ivory">{t.name}</span>
-                    <span className="mt-0.5 block text-[0.6rem] text-ivory/45">
-                      {gone ? "Sold out" : (t.admits ?? 1) > 1 ? `Admits ${t.admits}` : "Admits one"}
+                    <span className="flex min-w-0 items-center gap-3">
+                      <span
+                        aria-hidden
+                        className={cn(
+                          "flex size-3.5 shrink-0 items-center justify-center rounded-full border",
+                          selected ? "border-gold" : "border-ivory/25",
+                        )}
+                      >
+                        {selected && <span className="size-1.5 rounded-full bg-gold" />}
+                      </span>
+                      <span className="truncate text-[0.62rem] font-semibold uppercase tracking-[0.16em] sm:text-[0.68rem]">
+                        {t.name}
+                        <span className="ml-2 font-normal tracking-[0.12em] text-ivory/40">
+                          {gone ? "Sold out" : (t.admits ?? 1) > 1 ? `Admits ${t.admits}` : "Admits one"}
+                        </span>
+                      </span>
                     </span>
-                  </span>
-                </span>
-                <span className={cn("font-display text-[1.15rem] leading-none", gone ? "text-ivory/40 line-through" : "text-ivory")}>
-                  {formatMoney(t.priceCents, t.currency)}
-                </span>
-              </button>
-            );
-          })}
-        </div>
+                    <span className={cn("shrink-0 font-display text-[1.15rem] leading-none sm:text-[1.25rem]", gone && "text-ivory/35 line-through")}>
+                      {formatMoney(t.priceCents, t.currency)}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+            )}
 
-        <div className="mt-2 flex items-center justify-between rounded-[3px] border border-ivory/10 px-3 py-1.5">
-          <span>
-            <span className="block text-[0.55rem] font-semibold uppercase tracking-[0.24em] text-ivory/50">Quantity</span>
-            <span className="mt-0.5 block text-[0.62rem] text-ivory/40">
-              {admits} {admits === 1 ? "guest" : "guests"}
-            </span>
-          </span>
-          <div className="flex items-center gap-3">
-            <Stepper label="Fewer" disabled={qty <= 1 || busy} onClick={() => setQuantity(Math.max(1, qty - 1))}>
-              −
-            </Stepper>
-            <span aria-live="polite" className="w-4 text-center font-display text-[1.25rem] leading-none">
-              {qty}
-            </span>
-            <Stepper label="More" disabled={qty >= maxQty || busy} onClick={() => setQuantity(Math.min(maxQty, qty + 1))}>
-              +
-            </Stepper>
+            <div className="mt-2 flex items-center justify-between">
+              <span>
+                <span className="eyebrow text-ivory/45">Quantity</span>
+                <span className="mt-0.5 block text-[0.72rem] text-ivory/50">
+                  {admits} {admits === 1 ? "guest" : "guests"}
+                </span>
+              </span>
+              <div className="flex items-center gap-3">
+                <Stepper label="Fewer" disabled={qty <= 1 || busy} onClick={() => setQuantity(Math.max(1, qty - 1))}>
+                  −
+                </Stepper>
+                <span aria-live="polite" className="w-5 text-center font-display text-[1.35rem] leading-none">
+                  {qty}
+                </span>
+                <Stepper label="More" disabled={qty >= maxQty || busy} onClick={() => setQuantity(Math.min(maxQty, qty + 1))}>
+                  +
+                </Stepper>
+              </div>
+            </div>
+          </div>
+
+          <div className={cn(!locked && "lg:border-l lg:border-ivory/10 lg:pl-10")}>
+            <div className={cn(express ? "mb-3" : "hidden")}>
+              <ExpressCheckoutElement
+                onReady={({ availablePaymentMethods }) => setExpress(!!availablePaymentMethods)}
+                onClick={onExpressClick}
+                onConfirm={onExpressConfirm}
+                options={{
+                  buttonType: { applePay: "book", googlePay: "book" },
+                  buttonTheme: { applePay: "white", googlePay: "white" },
+                  buttonHeight: 40,
+                  paymentMethods: { link: "never", amazonPay: "never", paypal: "never", klarna: "never" },
+                }}
+              />
+            </div>
+
+            <div className="grid gap-2 sm:grid-cols-2">
+              <label className="block">
+                <span className={label}>Full name</span>
+                <input className={field} autoComplete="name" value={name} onChange={(e) => setName(e.target.value)} placeholder="As on your ID" />
+              </label>
+              <label className="block">
+                <span className={label}>Email</span>
+                <input
+                  className={field}
+                  type="email"
+                  inputMode="email"
+                  autoComplete="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="Passes are sent here"
+                />
+              </label>
+            </div>
+
+            <div className="mt-2">
+              <PaymentElement
+                options={{
+                  layout: "tabs",
+                  wallets: { applePay: "never", googlePay: "never", link: "never" },
+                  fields: { billingDetails: { name: "never", email: "never", address: "never" } },
+                  terms: { card: "never" },
+                }}
+              />
+            </div>
+
+            {error && (
+              <p role="alert" className="mt-3 border border-[#E7A598]/40 px-3 py-2 text-[0.75rem] text-[#E7A598]">
+                {error}
+              </p>
+            )}
           </div>
         </div>
-
-        <div className={cn(express ? "mt-3" : "hidden")}>
-          <ExpressCheckoutElement
-            onReady={({ availablePaymentMethods }) => setExpress(!!availablePaymentMethods)}
-            onClick={onExpressClick}
-            onConfirm={onExpressConfirm}
-            options={{
-              buttonType: { applePay: "book", googlePay: "book" },
-              buttonTheme: { applePay: "white", googlePay: "white" },
-              buttonHeight: 40,
-              paymentMethods: { link: "never", amazonPay: "never", paypal: "never", klarna: "never" },
-            }}
-          />
-        </div>
-
-        <div className="mt-3 grid gap-2 sm:grid-cols-2">
-          <label className="block">
-            <span className="mb-1 block text-[10px] font-semibold uppercase tracking-[0.24em] text-ivory/45">Full name</span>
-            <input className={field} autoComplete="name" value={name} onChange={(e) => setName(e.target.value)} placeholder="As on your ID" />
-          </label>
-          <label className="block">
-            <span className="mb-1 block text-[10px] font-semibold uppercase tracking-[0.24em] text-ivory/45">Email</span>
-            <input
-              className={field}
-              type="email"
-              inputMode="email"
-              autoComplete="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="Passes are sent here"
-            />
-          </label>
-        </div>
-
-        <div className="mt-3">
-          <PaymentElement
-            options={{
-              layout: "tabs",
-              wallets: { applePay: "never", googlePay: "never", link: "never" },
-              fields: { billingDetails: { name: "never", email: "never", address: "never" } },
-              terms: { card: "never" },
-            }}
-          />
-        </div>
-
-        {error && (
-          <p role="alert" className="mt-3 rounded-[3px] border border-[#E58A6E]/40 px-3 py-2 text-[0.75rem] text-[#F0B4A2]">
-            {error}
-          </p>
-        )}
-
-        <button
-          type="submit"
-          disabled={!stripe || busy}
-          className="group relative mt-3 h-11 w-full overflow-hidden rounded-[3px] bg-[linear-gradient(180deg,#F1DFB4_0%,#D2B47A_42%,#B08E55_70%,#C9A96E_100%)] text-[0.64rem] font-bold uppercase tracking-[0.32em] shadow-[inset_0_1px_0_rgba(255,255,255,0.6),inset_0_-1px_0_rgba(0,0,0,0.25),0_18px_44px_-14px_rgba(187,155,99,0.65)] transition-[filter,transform] duration-300 hover:brightness-[1.06] active:translate-y-px disabled:cursor-wait disabled:opacity-70"
-          style={{ color: INK }}
-        >
-          <span className="relative">{busy ? "Securing your passes…" : `Book · ${totalLabel}`}</span>
-        </button>
       </div>
+
+      <div className={cn("relative shrink-0 px-1 pt-2", !locked && "grid gap-4 lg:grid-cols-2 lg:gap-x-12")}>
+        {!locked && <div className="hidden lg:block" />}
+        <div className={cn(!locked && "lg:pl-10")}>
+          <button
+            type="submit"
+            disabled={!stripe || busy}
+            className="h-12 w-full rounded-[2px] bg-gold text-[0.68rem] font-semibold uppercase tracking-[0.18em] text-rich transition-colors duration-500 hover:bg-gold-soft disabled:cursor-wait disabled:opacity-50"
+          >
+            {busy ? "Securing your passes…" : `Book · ${totalLabel}`}
+          </button>
+        </div>
+      </div>
+
     </form>
   );
 }
@@ -429,7 +420,7 @@ function Stepper({
       aria-label={label}
       disabled={disabled}
       onClick={onClick}
-      className="flex size-7 items-center justify-center rounded-full border border-gold/30 text-base text-ivory transition-colors hover:border-gold hover:bg-gold/10 disabled:opacity-30"
+      className="flex size-8 items-center justify-center rounded-full border border-ivory/20 text-base text-ivory transition-colors duration-500 hover:border-gold disabled:opacity-30"
     >
       {children}
     </button>
@@ -438,8 +429,8 @@ function Stepper({
 
 function SoldOutCard() {
   return (
-    <div className="rounded-[6px] border border-gold/25 bg-[#0C0C0B]/72 px-8 py-12 text-center backdrop-blur-2xl">
-      <p className="font-display text-[2.4rem] leading-none">
+    <div className="px-6 py-12 text-center">
+      <p className="font-display text-[2.4rem] leading-none text-ivory">
         Sold <span className="italic text-gold">out.</span>
       </p>
       <p className="mt-4 text-sm text-ivory/55">Every pass for this night has been claimed.</p>
@@ -450,7 +441,7 @@ function SoldOutCard() {
 function Closed({ event }: { event: OneMoreEvent | null }) {
   return (
     <div className="flex flex-1 flex-col items-center justify-center pb-24 text-center">
-      <p className="font-display text-[clamp(2.6rem,8vw,4rem)] leading-none text-ivory">
+      <p className="font-display text-[clamp(2.2rem,8vw,3.2rem)] leading-none text-ivory">
         {event ? (
           <>
             {event.name} <span className="italic text-gold">— soon.</span>
@@ -469,14 +460,5 @@ function Closed({ event }: { event: OneMoreEvent | null }) {
         Return home
       </Link>
     </div>
-  );
-}
-
-function LockIcon() {
-  return (
-    <svg aria-hidden viewBox="0 0 16 16" className="size-3 fill-none stroke-current" strokeWidth="1.4">
-      <rect x="3" y="7" width="10" height="7" rx="1.2" />
-      <path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2" />
-    </svg>
   );
 }
