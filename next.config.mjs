@@ -71,6 +71,20 @@ const nextConfig = {
       // Listed after the catch-all so these replace Referrer-Policy on share pages.
       { source: "/tickets/shared", headers: sharedHeaders },
       { source: "/ticket/shared", headers: sharedHeaders },
+      {
+        source: "/admin",
+        headers: [
+          { key: "Cache-Control", value: "private, no-store" },
+          { key: "Referrer-Policy", value: "no-referrer" },
+        ],
+      },
+      {
+        source: "/admin/:path*",
+        headers: [
+          { key: "Cache-Control", value: "private, no-store" },
+          { key: "Referrer-Policy", value: "no-referrer" },
+        ],
+      },
     ];
   },
 };
