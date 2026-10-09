@@ -136,6 +136,4 @@ export interface OneMoreEvent {
   capacity?: number;
   saleStart?: string;
   saleEnd?: string;
-  /** Optional external ticketing URL if a sale ever runs off-site. */
-  externalTicketUrl?: string;
 }

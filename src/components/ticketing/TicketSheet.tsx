@@ -1,8 +1,6 @@
 "use client";
 
-import { useState } from "react";
 import type { OneMoreEvent } from "@/types/event";
-import type { OrderConfirmation } from "@/types/ticketing";
 import { getCheckoutProvider } from "@/lib/checkout";
 import { useLiveEvent } from "@/lib/availability";
 import { isOnSale } from "@/lib/events";
@@ -10,7 +8,6 @@ import { eventThemeToStyle } from "@/lib/theme";
 import { Dialog } from "@/components/ui/Dialog";
 import { ComingSoonState } from "./states/ComingSoonState";
 import { CheckoutState } from "./states/CheckoutState";
-import { ConfirmationState } from "./states/ConfirmationState";
 import { SoldOutState } from "./states/SoldOutState";
 import { TicketArtwork } from "./TicketArtwork";
 
@@ -30,7 +27,6 @@ interface TicketSheetProps {
  *   on-sale + provider disabled   → ComingSoonState (sales not connected yet)
  */
 export function TicketSheet({ open, event: staticEvent, onClose }: TicketSheetProps) {
-  const [confirmation, setConfirmation] = useState<OrderConfirmation | null>(null);
   const event = useLiveEvent(staticEvent, open);
 
   if (!event) return null;
@@ -41,20 +37,10 @@ export function TicketSheet({ open, event: staticEvent, onClose }: TicketSheetPr
   const themeStyle = eventThemeToStyle(event.theme);
 
   let content: React.ReactNode;
-  if (confirmation) {
-    content = <ConfirmationState confirmation={confirmation} onClose={onClose} />;
-  } else if (event.status === "sold-out") {
+  if (event.status === "sold-out") {
     content = <SoldOutState event={event} onClose={onClose} />;
   } else if (live) {
-    content = (
-      <CheckoutState
-        key={soldOutKey}
-        event={event}
-        provider={provider}
-        onClose={onClose}
-        onConfirmed={setConfirmation}
-      />
-    );
+    content = <CheckoutState key={soldOutKey} event={event} provider={provider} onClose={onClose} />;
   } else {
     content = <ComingSoonState event={event} onClose={onClose} />;
   }
