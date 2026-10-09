@@ -31,10 +31,6 @@ ErrorDocument 404 /404.html
   <FilesMatch "\.(html|txt)$">
     Header set Cache-Control "public, max-age=0, must-revalidate"
   </FilesMatch>
-  Header always set X-Content-Type-Options "nosniff"
-  Header always set Referrer-Policy "strict-origin-when-cross-origin"
-  Header always set X-Frame-Options "DENY"
-  Header always set Strict-Transport-Security "max-age=31536000"
-  Header always set Permissions-Policy "camera=(self), microphone=(), geolocation=(), payment=(self)"
-  Header always set Content-Security-Policy "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; script-src 'self' 'unsafe-inline' https://js.stripe.com https://*.js.stripe.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https://*.stripe.com; connect-src 'self' https://api.stripe.com https://r.stripe.com https://*.stripe.com https://curprrfrkefegefqiign.supabase.co; frame-src https://js.stripe.com https://hooks.stripe.com https://*.js.stripe.com https://*.stripe.com; worker-src 'self' blob:; form-action 'self' https://theonemorecompany.com"
+  # Security headers are set in next.config.mjs. Do not add them here.
+  # Hostinger's Node server is the production origin, and it does not apply this file.
 </IfModule>
