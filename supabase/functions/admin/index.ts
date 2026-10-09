@@ -234,7 +234,10 @@ async function scanRows<T>(
 ): Promise<T[]> {
   const rows: T[] = [];
   for (let from = 0; from < 20000; from += 500) {
-    const { data, error } = await admin.from(table).select(columns).eq("event_id", eventId).range(from, from + 499);
+    const query = table === "orders"
+      ? admin.from(table).select(columns).eq("event_id", eventId).eq("is_test", false)
+      : admin.from(table).select(`${columns}, orders!inner(is_test)`).eq("event_id", eventId).eq("orders.is_test", false);
+    const { data, error } = await query.range(from, from + 499);
     if (error) throw error;
     rows.push(...((data ?? []) as T[]));
     if (!data || data.length < 500) break;
@@ -389,6 +392,7 @@ async function overview(eventId: string) {
     .from("orders")
     .select("id, event_id, tier_id, tier_name, quantity, purchaser_name, purchaser_email, amount_total, currency, status, emailed_at, created_at")
     .eq("event_id", eventId)
+    .eq("is_test", false)
     .order("created_at", { ascending: false })
     .limit(8);
   if (error) throw error;
@@ -500,6 +504,7 @@ async function listOrders(body: Record<string, unknown>) {
       .select("id, event_id, tier_id, tier_name, quantity, purchaser_name, purchaser_email, amount_total, currency, status, emailed_at, created_at")
       .eq("id", ids[0])
       .eq("event_id", eventId)
+      .eq("is_test", false)
       .maybeSingle();
     if (error) throw error;
     if (!data) return { orders: [], page: 1, pageSize: page.pageSize, total: 0 };
@@ -517,6 +522,7 @@ async function listOrders(body: Record<string, unknown>) {
     .from("orders")
     .select("id, event_id, tier_id, tier_name, quantity, purchaser_name, purchaser_email, amount_total, currency, status, emailed_at, created_at", { count: "exact" })
     .eq("event_id", eventId)
+    .eq("is_test", false)
     .order("created_at", { ascending: false });
   if (payment) request = request.eq("status", payment);
   if (refund === "refunded") request = request.eq("status", "refunded");
@@ -552,6 +558,7 @@ async function orderDetail(body: Record<string, unknown>) {
     .select("id, event_id, tier_id, tier_name, quantity, purchaser_name, purchaser_email, amount_total, currency, status, emailed_at, created_at")
     .eq("id", ids[0])
     .eq("event_id", eventId)
+    .eq("is_test", false)
     .maybeSingle();
   if (error) throw error;
   if (!data || data.event_id !== eventId) return { error: "Order not found" };
@@ -593,8 +600,9 @@ async function listTickets(body: Record<string, unknown>) {
 
   let request = admin
     .from("tickets")
-    .select("id, event_id, tier_id, guest_number, status, checked_in_at, order_id, orders!inner(id, tier_name, status, event_id)", { count: "exact" })
+    .select("id, event_id, tier_id, guest_number, status, checked_in_at, order_id, orders!inner(id, tier_name, status, event_id, is_test)", { count: "exact" })
     .eq("event_id", eventId)
+    .eq("orders.is_test", false)
     .order("created_at", { ascending: false });
   if (tierId) request = request.eq("tier_id", tierId);
   if (status === "valid") request = request.eq("status", "valid");
@@ -671,9 +679,10 @@ async function ticketDetail(body: Record<string, unknown>) {
   if (ids.length !== 1) return { error: "Ticket not found" };
   const { data, error } = await admin
     .from("tickets")
-    .select("id, event_id, tier_id, guest_number, status, checked_in_at, order_id, orders!inner(id, tier_name, status, event_id)")
+    .select("id, event_id, tier_id, guest_number, status, checked_in_at, order_id, orders!inner(id, tier_name, status, event_id, is_test)")
     .eq("id", ids[0])
     .eq("event_id", eventId)
+    .eq("orders.is_test", false)
     .maybeSingle();
   if (error) throw error;
   const row = data as TicketJoin & { event_id: string } | null;
@@ -717,26 +726,33 @@ async function checkin(body: Record<string, unknown>) {
   };
 }
 
+interface ScanOrder {
+  tier_name: string;
+  status: string;
+  is_test: boolean;
+}
+
 async function recentScans(eventId: string) {
   const rows: {
     id: number;
     outcome: string;
     created_at: string;
-    tickets: { id: string; event_id: string; guest_number: number; tier_id: string; orders: { tier_name: string; status: string } | { tier_name: string; status: string }[] | null } | null;
+    tickets: { id: string; event_id: string; guest_number: number; tier_id: string; orders: ScanOrder | ScanOrder[] | null } | null;
   }[] = [];
   for (let from = 0; from < 1000; from += 200) {
     const { data, error } = await admin
       .from("scans")
-      .select("id, outcome, created_at, tickets(id, event_id, guest_number, tier_id, orders(tier_name, status))")
+      .select("id, outcome, created_at, tickets(id, event_id, guest_number, tier_id, orders(tier_name, status, is_test))")
       .order("created_at", { ascending: false })
       .range(from, from + 199);
     if (error) throw error;
     rows.push(...((data ?? []) as typeof rows));
     if (!data || data.length < 200) break;
   }
-  const matched = rows.filter((row) => !row.tickets || row.tickets.event_id === eventId);
+  const orderOf = (row: (typeof rows)[number]) => (Array.isArray(row.tickets?.orders) ? row.tickets?.orders[0] : row.tickets?.orders);
+  const matched = rows.filter((row) => (!row.tickets || row.tickets.event_id === eventId) && !orderOf(row)?.is_test);
   return matched.map((row) => {
-    const order = Array.isArray(row.tickets?.orders) ? row.tickets?.orders[0] : row.tickets?.orders;
+    const order = orderOf(row);
     const sameEvent = row.tickets?.event_id === eventId;
     return {
       at: row.created_at,
@@ -780,9 +796,12 @@ async function auditPage(body: Record<string, unknown>) {
 async function idsWithPrefix(table: "orders" | "tickets", eventId: string, prefix: string) {
   const matches: string[] = [];
   for (let from = 0; from < 20000; from += 1000) {
-    const { data, error } = await admin.from(table).select("id").eq("event_id", eventId).range(from, from + 999);
+    const query = table === "orders"
+      ? admin.from(table).select("id").eq("event_id", eventId).eq("is_test", false)
+      : admin.from(table).select("id, orders!inner(is_test)").eq("event_id", eventId).eq("orders.is_test", false);
+    const { data, error } = await query.range(from, from + 999);
     if (error) throw error;
-    for (const row of data ?? []) {
+    for (const row of (data ?? []) as { id: string }[]) {
       if (String(row.id).startsWith(prefix)) matches.push(row.id);
     }
     if (matches.length > 1 || !data || data.length < 1000) break;

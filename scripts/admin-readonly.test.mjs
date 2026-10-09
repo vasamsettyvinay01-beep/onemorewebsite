@@ -109,6 +109,16 @@ test("pass and scan labels do not invent a status", () => {
   assert.equal(displayScanResult("wrong-event", "paid"), "INVALID");
 });
 
+test("test orders stay out of every admin read", () => {
+  const orderReads = adminSource.match(/\.from\("orders"\)[\s\S]*?;/g) ?? [];
+  for (const read of orderReads) {
+    if (read.includes("limit(0)")) continue;
+    assert.match(read, /is_test/, read.slice(0, 80));
+  }
+  assert.match(adminSource, /orders\.is_test", false/);
+  assert.match(adminSource, /!orderOf\(row\)\?\.is_test/);
+});
+
 test("the operations UI does not call mutation actions", () => {
   for (const action of ["refund_one", "cancel_confirm", "staff_set", "pause_sales", "resend"]) {
     assert.equal(clientSource.includes(`"${action}"`), false, action);
