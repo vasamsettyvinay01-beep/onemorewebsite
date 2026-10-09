@@ -99,12 +99,14 @@ export function TicketsView() {
         const qr: Record<string, string> = {};
         await Promise.all(
           order.tickets.map(async (t) => {
-            qr[t.token] = await QRCode.toString(t.token, {
+            if (!/^[0-9a-f]{36}$/i.test(t.token)) return;
+            const svg = await QRCode.toString(t.token, {
               type: "svg",
               margin: 0,
               errorCorrectionLevel: "M",
               color: { dark: "#0F100F", light: "#F4F1EA" },
             });
+            if (svg.trimStart().startsWith("<svg")) qr[t.token] = svg;
           }),
         );
         if (cancelled) return;

@@ -11,17 +11,18 @@ Deno.serve(async (req) => {
   const eventId = new URL(req.url).searchParams.get("event") ?? "";
   if (!/^[a-z0-9_-]{1,64}$/i.test(eventId)) return json(req, { error: "Bad event" }, 400);
 
-  const { data, error } = await admin
-    .from("orders")
-    .select("tier_id, quantity")
-    .eq("event_id", eventId)
-    .neq("status", "refunded");
-  if (error) {
-    console.error(error);
+  const [sales, holds] = await Promise.all([
+    admin.rpc("event_sales", { p_event_id: eventId }),
+    admin.rpc("event_holds", { p_event_id: eventId }),
+  ]);
+  if (sales.error || holds.error) {
+    console.error(JSON.stringify({ msg: "availability_failed", eventId }));
     return json(req, { error: "Server error" }, 500);
   }
 
   const sold: Record<string, number> = {};
-  for (const o of data) sold[o.tier_id] = (sold[o.tier_id] ?? 0) + o.quantity;
-  return json(req, { sold });
+  const held: Record<string, number> = {};
+  for (const row of sales.data ?? []) sold[row.tier_id] = row.quantity;
+  for (const row of holds.data ?? []) held[row.tier_id] = row.quantity;
+  return json(req, { sold, held });
 });

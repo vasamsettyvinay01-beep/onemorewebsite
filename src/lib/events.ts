@@ -29,7 +29,7 @@ export function getVisibleTiers(event: OneMoreEvent): TicketTier[] {
 
 /** Tiers that can be bought right now at a fixed price. */
 export function getPurchasableTiers(event: OneMoreEvent): TicketTier[] {
-  return getVisibleTiers(event).filter((t) => !t.priceOnRequest && !t.soldOut);
+  return getVisibleTiers(event).filter((t) => !t.priceOnRequest && !t.soldOut && !t.unavailable);
 }
 
 export function getStartingTier(event: OneMoreEvent): TicketTier | undefined {

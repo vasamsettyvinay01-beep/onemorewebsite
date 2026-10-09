@@ -8,6 +8,14 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders(req) });
   if (req.method !== "GET") return json(req, { error: "Method not allowed" }, 405);
 
+  const ip = (req.headers.get("x-forwarded-for") ?? "unknown").split(",")[0]?.trim().slice(0, 64) || "unknown";
+  const { data: allowed, error: limitErr } = await admin.rpc("allow_request", {
+    p_bucket: `tickets:${ip}`,
+    p_limit: 120,
+    p_window_seconds: 600,
+  });
+  if (!limitErr && allowed === false) return json(req, { error: "Please wait a moment and try again." }, 429);
+
   const params = new URL(req.url).searchParams;
   const accessToken = params.get("o");
   const sessionId = params.get("session");

@@ -73,6 +73,8 @@ export interface TicketTier {
   opensAfter?: string;
   /** Flip to true once the tier's inventory is gone — it stays listed as "Sold out". */
   soldOut?: boolean;
+  /** A checkout hold has claimed the remaining inventory. Hidden tiers stay hidden. */
+  unavailable?: boolean;
   /** Keep the tier out of the public site for now. */
   hidden?: boolean;
   description?: string;

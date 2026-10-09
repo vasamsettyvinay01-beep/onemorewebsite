@@ -22,7 +22,7 @@ export function CheckoutState({ event, provider }: Props) {
 
   async function continueToCheckout(e: FormEvent) {
     e.preventDefault();
-    if (submitting || tier.soldOut) return;
+    if (submitting || tier.soldOut || tier.unavailable) return;
     setSubmitting(true);
     setError(null);
     const result = await provider.createCheckout({
@@ -45,27 +45,30 @@ export function CheckoutState({ event, provider }: Props) {
         {tiers.length > 1 ? (
           <fieldset className="flex min-h-0 flex-1 flex-col justify-evenly">
             <legend className="eyebrow mb-1 text-ivory-muted">Ticket</legend>
-            {tiers.map((t) => (
-              <label key={t.id} className={`flex items-center justify-between gap-4 ${t.soldOut ? "cursor-not-allowed" : "cursor-pointer"}`}>
+            {tiers.map((t) => {
+              const gone = !!t.soldOut || !!t.unavailable;
+              return (
+              <label key={t.id} className={`flex items-center justify-between gap-4 ${gone ? "cursor-not-allowed" : "cursor-pointer"}`}>
                 <span className="flex items-center gap-3">
                   <input
                     type="radio"
                     name="tier"
                     className="size-3.5 accent-(--ev-accent)"
-                    checked={!t.soldOut && t.id === tier.id}
-                    disabled={t.soldOut}
+                    checked={!gone && t.id === tier.id}
+                    disabled={gone}
                     onChange={() => setTier(t)}
                   />
-                  <span className={`text-[0.78rem] uppercase tracking-[0.16em] ${t.soldOut ? "text-ivory/35" : ""}`}>
+                  <span className={`text-[0.78rem] uppercase tracking-[0.16em] ${gone ? "text-ivory/35" : ""}`}>
                     {t.name}
-                    {t.soldOut && <span className="ml-2 font-semibold tracking-[0.14em] text-(--ev-accent)">Sold out</span>}
+                    {gone && <span className="ml-2 font-semibold tracking-[0.14em] text-(--ev-accent)">Sold out</span>}
                   </span>
                 </span>
-                <span className={`font-display text-xl leading-none ${t.soldOut ? "text-ivory/30 line-through" : ""}`}>
+                <span className={`font-display text-xl leading-none ${gone ? "text-ivory/30 line-through" : ""}`}>
                   {formatMoney(t.priceCents, t.currency)}
                 </span>
               </label>
-            ))}
+              );
+            })}
           </fieldset>
         ) : (
           <div className="flex items-end justify-between">
@@ -82,7 +85,7 @@ export function CheckoutState({ event, provider }: Props) {
             {error}
           </p>
         )}
-        <Button type="submit" variant="event" size="lg" className="mt-3 w-full" disabled={submitting || tier.soldOut}>
+        <Button type="submit" variant="event" size="lg" className="mt-3 w-full" disabled={submitting || tier.soldOut || tier.unavailable}>
           {submitting ? "Processing…" : "Continue to payment"}
         </Button>
       </div>

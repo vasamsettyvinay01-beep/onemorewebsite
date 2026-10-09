@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { OneMoreEvent } from "@/types/event";
 import { backendConfigured, functionUrl } from "@/data/backend";
 
-type Sold = Record<string, number>;
+type Counts = Record<string, number>;
 
 /**
  * The event with live sell-outs applied: a tier with a `capacity` is treated
@@ -12,7 +12,7 @@ type Sold = Record<string, number>;
  * `opensAfter` it. Falls back to the static data while loading or offline.
  */
 export function useLiveEvent(event: OneMoreEvent | null, active: boolean): OneMoreEvent | null {
-  const [sold, setSold] = useState<{ eventId: string; sold: Sold } | null>(null);
+  const [sold, setSold] = useState<{ eventId: string; sold: Counts; held: Counts } | null>(null);
   const eventId = event?.id;
   const capped = !!event?.ticketTiers.some((t) => t.capacity !== undefined);
 
@@ -21,8 +21,8 @@ export function useLiveEvent(event: OneMoreEvent | null, active: boolean): OneMo
     let cancelled = false;
     fetch(`${functionUrl("availability")}?event=${encodeURIComponent(eventId)}`, { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : null))
-      .then((body: { sold: Sold } | null) => {
-        if (!cancelled && body) setSold({ eventId, sold: body.sold });
+      .then((body: { sold?: Counts; held?: Counts } | null) => {
+        if (!cancelled && body?.sold) setSold({ eventId, sold: body.sold, held: body.held ?? {} });
       })
       .catch(() => {});
     return () => {
@@ -34,9 +34,12 @@ export function useLiveEvent(event: OneMoreEvent | null, active: boolean): OneMo
     if (!event || !sold || sold.eventId !== event.id) return event;
     return {
       ...event,
-      ticketTiers: event.ticketTiers.map((t) =>
-        t.capacity !== undefined && (sold.sold[t.id] ?? 0) >= t.capacity ? { ...t, soldOut: true } : t,
-      ),
+      ticketTiers: event.ticketTiers.map((t) => {
+        if (t.capacity === undefined) return t;
+        const paid = sold.sold[t.id] ?? 0;
+        const held = sold.held[t.id] ?? 0;
+        return { ...t, soldOut: paid >= t.capacity, unavailable: paid + held >= t.capacity };
+      }),
     };
   }, [event, sold]);
 }

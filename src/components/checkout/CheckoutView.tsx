@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { loadStripe, type Appearance, type StripeElementsOptions } from "@stripe/stripe-js";
@@ -147,7 +147,7 @@ function CheckoutCard({ event, initialTier }: { event: OneMoreEvent; initialTier
   const stripe = useStripe();
   const elements = useElements();
   const tiers = getVisibleTiers(event).filter((t) => !t.priceOnRequest);
-  const buyable = tiers.filter((t) => !t.soldOut);
+  const buyable = tiers.filter((t) => !t.soldOut && !t.unavailable);
   const chosen = buyable.find((t) => t.id === initialTier);
   const [tierId, setTierId] = useState(chosen?.id ?? "");
   const tier: TicketTier | undefined = chosen ?? buyable.find((t) => t.id === tierId) ?? [...buyable].sort((a, b) => a.priceCents - b.priceCents)[0];
@@ -158,6 +158,9 @@ function CheckoutCard({ event, initialTier }: { event: OneMoreEvent; initialTier
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [express, setExpress] = useState(true);
+  const phase = useRef<"idle" | "wallet" | "paying">("idle");
+  const idempotencyKey = useRef<string | null>(null);
+  const attempt = useRef("");
 
   const [quote, setQuote] = useState<{ key: string; tax: number; total: number } | null>(null);
 
@@ -196,11 +199,34 @@ function CheckoutCard({ event, initialTier }: { event: OneMoreEvent; initialTier
   const totalLabel = formatMoney(total, tier.currency);
   const valid = name.trim().length > 1 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
 
+  function paymentKey(buyerEmail: string) {
+    const next = `${tier!.id}:${qty}:${buyerEmail.trim().toLowerCase()}`;
+    if (attempt.current !== next || !idempotencyKey.current) {
+      attempt.current = next;
+      idempotencyKey.current = crypto.randomUUID();
+    }
+    return idempotencyKey.current;
+  }
+
+  async function releaseHold(key: string) {
+    await fetch(functionUrl("checkout"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ release: true, idempotencyKey: key }),
+    }).catch(() => {});
+  }
+
   async function createIntent(buyer: { name: string; email: string }) {
     const res = await fetch(functionUrl("checkout"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ eventId: event.id, tierId: tier!.id, quantity: qty, ...buyer }),
+      body: JSON.stringify({
+        eventId: event.id,
+        tierId: tier!.id,
+        quantity: qty,
+        idempotencyKey: paymentKey(buyer.email),
+        ...buyer,
+      }),
     });
     const body = await res.json().catch(() => ({}));
     if (!res.ok || !body.clientSecret) throw new Error(body.error ?? "Something went wrong. Please try again.");
@@ -226,24 +252,34 @@ function CheckoutCard({ event, initialTier }: { event: OneMoreEvent; initialTier
 
   async function payByCard(e: FormEvent) {
     e.preventDefault();
-    if (!stripe || !elements || busy || !priced) return;
+    if (!stripe || !elements || phase.current !== "idle" || !priced) return;
     if (!valid) {
       setError("Add the name and email for your passes.");
       return;
     }
+    phase.current = "paying";
     setBusy(true);
     setError(null);
+    const key = paymentKey(email);
     try {
       const { error: fieldError } = await elements.submit();
       if (fieldError) throw new Error(fieldError.message);
       await confirm({ name: name.trim(), email: email.trim() });
     } catch (err) {
+      await releaseHold(key);
+      idempotencyKey.current = null;
+      phase.current = "idle";
       setError((err as Error).message);
       setBusy(false);
     }
   }
 
   function onExpressClick(e: StripeExpressCheckoutElementClickEvent) {
+    if (!priced || phase.current !== "idle") {
+      e.reject();
+      return;
+    }
+    phase.current = "wallet";
     setError(null);
     e.resolve({
       emailRequired: true,
@@ -254,17 +290,30 @@ function CheckoutCard({ event, initialTier }: { event: OneMoreEvent; initialTier
     });
   }
 
+  function onExpressCancel() {
+    if (phase.current === "wallet") phase.current = "idle";
+  }
+
   async function onExpressConfirm(e: StripeExpressCheckoutElementConfirmEvent) {
-    if (!elements) return;
+    if (!elements || phase.current === "paying") {
+      e.paymentFailed({ reason: "fail" });
+      return;
+    }
+    phase.current = "paying";
     setBusy(true);
+    const buyerEmail = e.billingDetails?.email?.trim() || email.trim();
+    const key = paymentKey(buyerEmail);
     try {
       const { error: submitError } = await elements.submit();
       if (submitError) throw new Error(submitError.message);
       await confirm({
         name: e.billingDetails?.name?.trim() || name.trim() || "Guest",
-        email: e.billingDetails?.email?.trim() || email.trim(),
+        email: buyerEmail,
       });
     } catch (err) {
+      await releaseHold(key);
+      idempotencyKey.current = null;
+      phase.current = "idle";
       e.paymentFailed({ reason: "fail" });
       setError((err as Error).message);
       setBusy(false);
@@ -296,7 +345,7 @@ function CheckoutCard({ event, initialTier }: { event: OneMoreEvent; initialTier
             <div role="radiogroup" aria-label="Admission" className="divide-y divide-ivory/10 border-y border-ivory/10">
               {tiers.map((t) => {
                 const selected = t.id === tier.id;
-                const gone = !!t.soldOut;
+                const gone = !!t.soldOut || !!t.unavailable;
                 return (
                   <button
                     key={t.id}
@@ -371,6 +420,7 @@ function CheckoutCard({ event, initialTier }: { event: OneMoreEvent; initialTier
                 }
                 onClick={onExpressClick}
                 onConfirm={onExpressConfirm}
+                onCancel={onExpressCancel}
                 options={{
                   buttonType: { applePay: "book", googlePay: "book" },
                   buttonTheme: { applePay: "white", googlePay: "white" },

@@ -181,7 +181,7 @@ for (const tier of event.ticketTiers) {
 
 // 2. Webhook
 if (webhookUrl) {
-  const enabled_events = ["checkout.session.completed", "payment_intent.succeeded", "charge.refunded"];
+  const enabled_events = ["checkout.session.completed", "payment_intent.succeeded", "charge.refunded", "charge.dispute.created"];
   const existing = (await listAll("webhook_endpoints")).find((e) => e.url === webhookUrl);
   if (existing) {
     await stripe("POST", `webhook_endpoints/${existing.id}`, { enabled_events });

@@ -34,6 +34,8 @@ Deno.serve(async (req) => {
   const eventId = typeof body.eventId === "string" ? body.eventId : "";
   const device = typeof body.device === "string" ? body.device.slice(0, 40) : null;
   if (!eventId) return json(req, { error: "eventId required" }, 400);
+  const limit = body.action === "search" ? 40 : body.action === "stats" ? 180 : 400;
+  if (!(await allow(`${body.action}:${staff}`, limit))) return json(req, { error: "Please wait a moment and try again." }, 429);
 
   try {
     switch (body.action) {
@@ -80,18 +82,21 @@ Deno.serve(async (req) => {
       }
 
       case "search": {
-        const q = typeof body.q === "string" ? body.q.trim().replace(/[%_,()]/g, "") : "";
-        if (q.length < 2) return json(req, { orders: [] });
-        const { data, error } = await admin
-          .from("orders")
-          .select("id, purchaser_name, purchaser_email, tier_name, status, tickets(id, guest_number, status, checked_in_at, checked_in_by)")
-          .eq("event_id", eventId)
-          .or(`purchaser_name.ilike.%${q}%,purchaser_email.ilike.%${q}%`)
-          .order("created_at", { ascending: false })
-          .limit(20);
-        if (error) throw error;
-        for (const o of data) o.tickets.sort((a, b) => a.guest_number - b.guest_number);
-        return json(req, { orders: data });
+        const q = typeof body.q === "string" ? body.q.trim().slice(0, 80) : "";
+        if (q.length < 2 || !/^[\p{L}\p{N}@.+_ -]+$/u.test(q)) return json(req, { orders: [] });
+        const pattern = `%${q}%`;
+        const columns = "id, purchaser_name, purchaser_email, tier_name, status, tickets(id, guest_number, status, checked_in_at, checked_in_by)";
+        const [byName, byEmail] = await Promise.all([
+          admin.from("orders").select(columns).eq("event_id", eventId).ilike("purchaser_name", pattern).order("created_at", { ascending: false }).limit(20),
+          admin.from("orders").select(columns).eq("event_id", eventId).ilike("purchaser_email", pattern).order("created_at", { ascending: false }).limit(20),
+        ]);
+        if (byName.error) throw byName.error;
+        if (byEmail.error) throw byEmail.error;
+        const merged = new Map<string, (typeof byName.data)[number]>();
+        for (const order of [...(byName.data ?? []), ...(byEmail.data ?? [])]) merged.set(order.id, order);
+        const orders = [...merged.values()];
+        for (const order of orders) order.tickets.sort((a, b) => a.guest_number - b.guest_number);
+        return json(req, { orders });
       }
 
       default:
@@ -102,6 +107,16 @@ Deno.serve(async (req) => {
     return json(req, { error: "Server error" }, 500);
   }
 });
+
+async function allow(bucket: string, limit: number): Promise<boolean> {
+  const { data, error } = await admin.rpc("allow_request", {
+    p_bucket: bucket.slice(0, 120),
+    p_limit: limit,
+    p_window_seconds: 600,
+  });
+  if (error) return true;
+  return data === true;
+}
 
 async function checkIn(token: string, eventId: string, staff: string, device: string | null) {
   const { data, error } = await admin.rpc("check_in_ticket", {

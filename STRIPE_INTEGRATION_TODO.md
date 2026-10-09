@@ -1,5 +1,7 @@
 # Stripe integration — remaining setup
 
+The embedded `create-checkout-session` path is closed (HTTP 410). Live bookings go through `supabase/functions/checkout`, which prices the pass from `tiers` and adds Houston ticket tax. Do not turn the embedded session back on unless it uses that same tax quote.
+
 The embedded Checkout form charges the selected pass from the `tiers` table and sends the guest details the webhook needs to email the pass.
 
 ## Values to Replace
@@ -54,11 +56,12 @@ npx supabase functions deploy create-checkout-session --use-api
 
 ### How a purchase works
 
-1. The guest picks a pass, quantity, name, and email.
-2. The page POSTs those to `create-checkout-session`.
-3. The function checks capacity, charges `price_cents × quantity`, and stores the booking on the Checkout Session.
-4. The embedded form confirms the payment, then the browser opens `/tickets/?session=cs_…`.
-5. `checkout.session.completed` creates the order and emails the passes. `payment_intent.succeeded` is skipped for these payments (`omc_source` is `embedded`) so the pass is not emailed twice.
+Live bookings use `supabase/functions/checkout` and `CheckoutView`. `create-checkout-session` returns 410 and must stay closed.
+
+1. The guest picks a pass, quantity, name, and email on `/checkout`.
+2. The page POSTs those to `checkout`. The server prices the pass from `tiers`, adds Houston ticket tax, and holds inventory.
+3. Stripe confirms the PaymentIntent. The browser opens `/tickets/?session=pi_…`.
+4. `payment_intent.succeeded` creates the order and emails the passes. A repeated webhook does not create a second order.
 
 ### Testing
 
