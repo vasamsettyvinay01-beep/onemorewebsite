@@ -82,14 +82,14 @@ export function CheckoutView() {
   const when = [date?.replace(/, \d{4}$/, ""), event ? formatEventTime(event) : undefined].filter(Boolean).join(" · ");
 
   return (
-    <main className="fixed inset-0 overflow-hidden bg-rich text-ivory">
+    <main className="fixed inset-0 overflow-y-auto bg-rich text-ivory">
       <div
         className={cn(
-          "mx-auto flex h-full w-full items-center px-5 py-4 sm:px-8",
+          "mx-auto flex min-h-full w-full items-center px-5 py-4 sm:px-8",
           params.get("tier") ? "max-w-xl" : "max-w-5xl",
         )}
       >
-        <div className="flex max-h-full w-full flex-col">
+        <div className="flex w-full flex-col">
           <header className="shrink-0">
             <Link href="/" aria-label={brand.name} className="inline-flex">
               {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -157,7 +157,7 @@ function CheckoutCard({ event, initialTier }: { event: OneMoreEvent; initialTier
   const [email, setEmail] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [express, setExpress] = useState(false);
+  const [express, setExpress] = useState(true);
 
   const maxQty = Math.min(tier?.maxPerOrder ?? 10, 10);
   const qty = Math.min(quantity, maxQty);
@@ -333,16 +333,25 @@ function CheckoutCard({ event, initialTier }: { event: OneMoreEvent; initialTier
           </div>
 
           <div className={cn(!locked && "lg:border-l lg:border-ivory/10 lg:pl-10")}>
-            <div className={cn(express ? "mb-3" : "hidden")}>
+            <div className={cn(express && "mb-3")}>
               <ExpressCheckoutElement
-                onReady={({ availablePaymentMethods }) => setExpress(!!availablePaymentMethods)}
+                onReady={({ availablePaymentMethods }) =>
+                  setExpress(!!(availablePaymentMethods?.applePay || availablePaymentMethods?.googlePay))
+                }
                 onClick={onExpressClick}
                 onConfirm={onExpressConfirm}
                 options={{
                   buttonType: { applePay: "book", googlePay: "book" },
                   buttonTheme: { applePay: "white", googlePay: "white" },
-                  buttonHeight: 40,
-                  paymentMethods: { link: "never", amazonPay: "never", paypal: "never", klarna: "never" },
+                  buttonHeight: 44,
+                  paymentMethods: {
+                    applePay: "always",
+                    googlePay: "always",
+                    link: "never",
+                    amazonPay: "never",
+                    paypal: "never",
+                    klarna: "never",
+                  },
                 }}
               />
             </div>
