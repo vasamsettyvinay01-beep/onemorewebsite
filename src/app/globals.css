@@ -16,6 +16,7 @@
 
   --font-sans: var(--font-manrope), "Helvetica Neue", Arial, sans-serif;
   --font-display: var(--font-instrument), "Times New Roman", Georgia, serif;
+  --font-event: var(--font-cormorant), "Times New Roman", Georgia, serif;
 
   --ease-cinematic: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-soft: cubic-bezier(0.4, 0, 0.2, 1);
@@ -176,6 +177,14 @@
   letter-spacing: -0.04em;
   line-height: 0.96;
   text-transform: uppercase;
+}
+
+/* High-contrast serif reserved for the event name */
+@utility font-event {
+  font-family: var(--font-event);
+  font-weight: 500;
+  letter-spacing: -0.03em;
+  line-height: 0.88;
 }
 
 /* Small serif editorial line */

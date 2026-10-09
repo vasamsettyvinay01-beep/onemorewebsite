@@ -12,6 +12,7 @@ import "./globals.css";
  * Self-hosted, SIL Open Font License typefaces (latin subset).
  * Manrope — display, UI and body.
  * Instrument Serif — the occasional editorial accent.
+ * Cormorant Garamond — the event name, set apart from the UI voice.
  */
 const manrope = localFont({
   variable: "--font-manrope",
@@ -25,6 +26,15 @@ const instrumentSerif = localFont({
   src: [
     { path: "../fonts/InstrumentSerif-Regular.woff2", weight: "400", style: "normal" },
     { path: "../fonts/InstrumentSerif-Italic.woff2", weight: "400", style: "italic" },
+  ],
+});
+
+const cormorant = localFont({
+  variable: "--font-cormorant",
+  display: "swap",
+  src: [
+    { path: "../fonts/CormorantGaramond-500.woff2", weight: "500", style: "normal" },
+    { path: "../fonts/CormorantGaramond-500-Italic.woff2", weight: "500", style: "italic" },
   ],
 });
 
@@ -58,7 +68,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html
       lang="en"
-      className={`${manrope.variable} ${instrumentSerif.variable} h-full antialiased`}
+      className={`${manrope.variable} ${instrumentSerif.variable} ${cormorant.variable} h-full antialiased`}
       suppressHydrationWarning
     >
       <head>

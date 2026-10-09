@@ -26,7 +26,6 @@ export function FloatingTicketTab({ event }: FloatingTicketTabProps) {
   const onSale = event.status === "on-sale";
   const soldOut = event.status === "sold-out";
   const action = soldOut ? "View status" : onSale ? "Get tickets" : "Get access";
-  const headline = soldOut ? "Sold out" : onSale ? "Get tickets" : "Get access";
   const urgency = soldOut
     ? "This one went fast."
     : onSale
@@ -71,15 +70,12 @@ export function FloatingTicketTab({ event }: FloatingTicketTabProps) {
                 <span className="rounded-[2px] bg-gold px-2 py-1 text-[0.62rem] font-semibold uppercase tracking-[0.22em] text-rich">
                   {badge}
                 </span>
-                <span className="min-w-0 truncate text-[0.68rem] font-semibold uppercase tracking-[0.18em] text-gold-soft">
-                  {event.name}
-                </span>
               </span>
 
-              <span className="mt-3 block font-headline text-[clamp(2.45rem,9vw,4.35rem)] leading-[0.86] text-ivory short:mt-2 short:text-[2.15rem] lg:mt-4">
-                {headline}
+              <span className="mt-3 block font-event text-[clamp(3.15rem,11vw,5.1rem)] text-metallic drop-shadow-[0_0_22px_rgba(187,155,99,0.45)] short:mt-2 short:text-[2.55rem] lg:mt-4 lg:text-[2.85rem] xl:text-[clamp(3.35rem,3.5vw,4.85rem)]">
+                {event.name}
               </span>
-              <span className="mt-1.5 block font-display text-[clamp(1.3rem,4.6vw,2.05rem)] italic leading-none text-gold-soft lg:mt-2">
+              <span className="mt-2 block font-display text-[clamp(1.2rem,4.2vw,1.75rem)] italic leading-none text-ivory/78 lg:mt-2.5">
                 {urgency}
               </span>
 
