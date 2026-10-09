@@ -11,6 +11,7 @@ import { Intro } from "@/components/intro/Intro";
 import { IntroProvider } from "@/components/intro/IntroProvider";
 import { Header } from "@/components/layout/Header";
 import { PointerLight } from "@/components/motion/PointerLight";
+import { FloatingTicketTab } from "@/components/ticketing/FloatingTicketTab";
 import { TicketSheetProvider } from "@/components/ticketing/TicketSheetProvider";
 import { anchors } from "@/data/navigation";
 import { getFeaturedEvent } from "@/lib/events";
@@ -54,6 +55,7 @@ export default function HomePage() {
             </main>
           </OneMoreCanvas>
 
+          {featured && <FloatingTicketTab event={featured} />}
           <FloatingCommunityPill />
         </TicketSheetProvider>
       </CommunityProvider>

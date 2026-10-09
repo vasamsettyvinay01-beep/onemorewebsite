@@ -52,7 +52,7 @@ export function FloatingCommunityPill() {
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: 16 }}
           transition={{ duration: 0.7, ease: ease.cinematic }}
-          className="fixed bottom-0 right-0 z-[60] pb-safe pr-6 sm:pr-12 lg:pr-16"
+          className="fixed bottom-[17.5rem] right-0 z-[60] pr-6 short:bottom-[15rem] sm:bottom-[20rem] sm:pr-12 lg:bottom-0 lg:pb-safe lg:pr-16"
         >
           <button
             type="button"
