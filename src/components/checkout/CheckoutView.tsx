@@ -287,7 +287,7 @@ function CheckoutCard({ event, initialTier }: { event: OneMoreEvent; initialTier
           <p className="shrink-0 text-[0.48rem] font-semibold uppercase tracking-[0.28em] text-gold/80">{event.name}</p>
         </div>
 
-        <div role="radiogroup" aria-label="Admission" className="mt-3 flex flex-col gap-1.5">
+        <div role="radiogroup" aria-label="Admission" className="mt-2.5 flex flex-col gap-1">
           {tiers.map((t) => {
             const selected = t.id === tier.id;
             const gone = !!t.soldOut;
@@ -300,7 +300,7 @@ function CheckoutCard({ event, initialTier }: { event: OneMoreEvent; initialTier
                 disabled={gone || busy}
                 onClick={() => setTierId(t.id)}
                 className={cn(
-                  "flex items-center justify-between gap-3 rounded-[3px] border px-3 py-2 text-left transition-[border-color,background-color]",
+                  "flex items-center justify-between gap-3 rounded-[3px] border px-3 py-1.5 text-left transition-[border-color,background-color]",
                   selected
                     ? "border-gold/80 bg-[linear-gradient(120deg,rgba(187,155,99,0.16),rgba(187,155,99,0.04))]"
                     : "border-ivory/10 bg-white/[0.015] hover:border-gold/40",
