@@ -23,7 +23,7 @@ Deno.serve(async (req) => {
   let query = admin
     .from("orders")
     .select(
-      "event_id, tier_id, tier_name, purchaser_name, purchaser_email, quantity, status, access_token, tickets(guest_number, token, status, checked_in_at)",
+      "event_id, tier_name, purchaser_name, status, access_token, tickets(guest_number, token, status, checked_in_at)",
     );
   if (accessToken && /^[0-9a-f]{48}$/.test(accessToken)) query = query.eq("access_token", accessToken);
   else if (sessionId && /^(cs_(test|live)_|pi_)[A-Za-z0-9]{10,200}$/.test(sessionId)) query = query.eq("stripe_session_id", sessionId);
@@ -31,12 +31,24 @@ Deno.serve(async (req) => {
 
   const { data, error } = await query.maybeSingle();
   if (error) {
-    console.error(error);
+    console.error("ticket-view query failed");
     return json(req, { error: "Server error" }, 500);
   }
   // Webhook may still be in flight right after checkout; the page polls on 404.
   if (!data) return json(req, { error: "Not found" }, 404);
 
   data.tickets.sort((a, b) => a.guest_number - b.guest_number);
-  return json(req, data);
+  return json(req, {
+    event_id: data.event_id,
+    tier_name: data.tier_name,
+    purchaser_name: data.purchaser_name,
+    status: data.status,
+    access_token: data.access_token,
+    tickets: data.tickets.map((ticket) => ({
+      guest_number: ticket.guest_number,
+      token: ticket.token,
+      status: ticket.status,
+      checked_in_at: ticket.checked_in_at,
+    })),
+  });
 });

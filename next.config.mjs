@@ -13,22 +13,26 @@ const supabase = "https://curprrfrkefegefqiign.supabase.co";
 // No Address Element, so Google Maps is not allowed.
 // fonts.googleapis.com is the Elements cssSrc; Stripe requires it on connect-src.
 // 'unsafe-inline' scripts: Next.js bootstrap plus the intro sessionStorage
-// script. A nonce would not survive Hostinger's prerender cache. No unsafe-eval.
-const contentSecurityPolicy = [
-  "default-src 'self'",
-  "base-uri 'self'",
-  "object-src 'none'",
-  "frame-ancestors 'none'",
-  "form-action 'self'",
-  "script-src 'self' 'unsafe-inline' https://js.stripe.com https://*.js.stripe.com",
-  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-  "font-src 'self' https://fonts.gstatic.com",
-  "img-src 'self' data:",
-  `connect-src 'self' https://api.stripe.com https://fonts.googleapis.com ${supabase} wss://curprrfrkefegefqiign.supabase.co`,
-  "frame-src https://js.stripe.com https://*.js.stripe.com https://hooks.stripe.com",
-  "worker-src 'self' blob:",
-  "upgrade-insecure-requests",
-].join("; ");
+// script. A nonce would not survive Hostinger's prerender cache.
+// React's dev server uses eval() for stack reconstruction. Production React does not.
+function contentSecurityPolicy() {
+  const devEval = process.env.NODE_ENV === "development" ? " 'unsafe-eval'" : "";
+  return [
+    "default-src 'self'",
+    "base-uri 'self'",
+    "object-src 'none'",
+    "frame-ancestors 'none'",
+    "form-action 'self'",
+    `script-src 'self' 'unsafe-inline'${devEval} https://js.stripe.com https://*.js.stripe.com`,
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+    "font-src 'self' https://fonts.gstatic.com",
+    "img-src 'self' data:",
+    `connect-src 'self' https://api.stripe.com https://fonts.googleapis.com ${supabase} wss://curprrfrkefegefqiign.supabase.co`,
+    "frame-src https://js.stripe.com https://*.js.stripe.com https://hooks.stripe.com",
+    "worker-src 'self' blob:",
+    "upgrade-insecure-requests",
+  ].join("; ");
+}
 
 const securityHeaders = [
   { key: "Strict-Transport-Security", value: "max-age=31536000" },
@@ -39,7 +43,6 @@ const securityHeaders = [
   // js.stripe.com subdomains. Permissions-Policy cannot express that wildcard.
   // camera stays on this origin for the door QR scanner.
   { key: "Permissions-Policy", value: "camera=(self), microphone=(), geolocation=(), payment=*" },
-  { key: "Content-Security-Policy", value: contentSecurityPolicy },
 ];
 
 /** @type {import('next').NextConfig} */
@@ -51,7 +54,24 @@ const nextConfig = {
     qualities: [75, 90],
   },
   async headers() {
-    return [{ source: "/:path*", headers: securityHeaders }];
+    const sharedHeaders = [
+      ...securityHeaders.filter((header) => header.key !== "Referrer-Policy"),
+      { key: "Referrer-Policy", value: "no-referrer" },
+      { key: "Cache-Control", value: "private, no-store" },
+      { key: "Content-Security-Policy", value: contentSecurityPolicy() },
+    ];
+    return [
+      {
+        source: "/:path*",
+        headers: [
+          ...securityHeaders,
+          { key: "Content-Security-Policy", value: contentSecurityPolicy() },
+        ],
+      },
+      // Listed after the catch-all so these replace Referrer-Policy on share pages.
+      { source: "/tickets/shared", headers: sharedHeaders },
+      { source: "/ticket/shared", headers: sharedHeaders },
+    ];
   },
 };
 

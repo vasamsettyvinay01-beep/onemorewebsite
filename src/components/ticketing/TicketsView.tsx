@@ -11,6 +11,8 @@ import { formatChapter, formatEventTime } from "@/lib/events";
 import { cn } from "@/lib/cn";
 import type { OneMoreEvent } from "@/types/event";
 import { DiwaliFireworks } from "@/components/ticketing/DiwaliFireworks";
+import { TicketActions } from "@/components/ticketing/TicketActions";
+import { passStanding } from "@/lib/pass-standing";
 
 interface TicketRow {
   guest_number: number;
@@ -23,7 +25,6 @@ interface OrderView {
   event_id: string;
   tier_name: string;
   purchaser_name: string | null;
-  purchaser_email?: string | null;
   status: "paid" | "refunded" | "partially-refunded";
   access_token: string;
   tickets: TicketRow[];
@@ -49,16 +50,6 @@ function properName(name: string | null): string | null {
   return n.toLowerCase().replace(/(^|[\s'-])(\p{L})/gu, (_, sep: string, ch: string) => sep + ch.toUpperCase());
 }
 
-/** First readable word of a mailbox, when the booking has no name. */
-function nameFromEmail(email: string | null | undefined): string | null {
-  const local = email?.split("@")[0]?.split("+")[0] ?? "";
-  const word = local
-    .split(/[._-]/)
-    .map((part) => part.replace(/\d/g, ""))
-    .find((part) => /^[a-z]{2,24}$/i.test(part));
-  if (!word) return null;
-  return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
-}
 const time = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 
 function longDate(event: OneMoreEvent): string | undefined {
@@ -199,10 +190,14 @@ function Missing({ paid }: { paid: boolean }) {
   );
 }
 
+function statusLabel(ticketStatus: TicketRow["status"] | undefined, orderStatus: OrderView["status"]): string {
+  return passStanding(ticketStatus, orderStatus);
+}
+
 function Passes({ order, qr }: { order: OrderView; qr: Record<string, string> }) {
   const event = events.find((e) => e.id === order.event_id);
   const total = order.tickets.length;
-  const holder = properName(order.purchaser_name) ?? nameFromEmail(order.purchaser_email);
+  const holder = properName(order.purchaser_name);
   const first = holder?.split(" ")[0];
   const date = event ? longDate(event) : undefined;
   const venue = event?.venue;
@@ -215,7 +210,7 @@ function Passes({ order, qr }: { order: OrderView; qr: Record<string, string> })
       <section className="shrink-0 px-1 pt-1.5 text-center">
         <p className="text-[0.48rem] font-semibold uppercase tracking-[0.34em] text-gold">
           {event?.chapter !== undefined ? `${formatChapter(event.chapter)} · ` : ""}
-          {order.status === "refunded" ? "Refunded" : "Confirmed"}
+          {statusLabel(ticket?.status, order.status)}
         </p>
         {first && <p className="mt-1 font-display text-[1.15rem] italic leading-none text-gold-soft">Dear {first},</p>}
         <h1 className="mt-0.5 font-display text-[1.85rem] leading-none text-ivory">{event?.name ?? "Your passes"}</h1>
@@ -241,6 +236,7 @@ function Passes({ order, qr }: { order: OrderView; qr: Record<string, string> })
         {ticket && (
           <Pass
             ticket={ticket}
+            orderStatus={order.status}
             total={total}
             svg={qr[ticket.token]}
             tierName={order.tier_name}
@@ -277,6 +273,19 @@ function Passes({ order, qr }: { order: OrderView; qr: Record<string, string> })
         )}
       </div>
 
+      {ticket && (
+        <TicketActions
+          accessToken={order.access_token}
+          guestNumber={ticket.guest_number}
+          total={total}
+          token={ticket.token}
+          tierName={order.tier_name}
+          event={event}
+          when={when}
+          venue={venue?.name ?? event?.city ?? ""}
+        />
+      )}
+
       {event?.partners && event.partners.length > 0 && (
         <div className="shrink-0 pt-1.5 text-center">
           <p className="text-[0.45rem] font-semibold uppercase tracking-[0.32em] text-gold">Partners</p>
@@ -310,6 +319,7 @@ function Passes({ order, qr }: { order: OrderView; qr: Record<string, string> })
 
 interface PassProps {
   ticket: TicketRow;
+  orderStatus: OrderView["status"];
   total: number;
   svg: string;
   tierName: string;
@@ -319,8 +329,9 @@ interface PassProps {
 }
 
 /** One guest's pass: black stock, gold hairline, ivory QR panel, perforated stub. */
-function Pass({ ticket, total, svg, tierName, holder, footLeft, footRight }: PassProps) {
-  const used = ticket.status !== "valid";
+function Pass({ ticket, orderStatus, total, svg, tierName, holder, footLeft, footRight }: PassProps) {
+  const standing = passStanding(ticket.status, orderStatus);
+  const blocked = standing !== "VALID";
   return (
     <article className="relative flex h-full flex-col overflow-hidden bg-[#12110F]">
       <div aria-hidden className="pointer-events-none absolute inset-0 border border-gold/55" />
@@ -347,19 +358,15 @@ function Pass({ ticket, total, svg, tierName, holder, footLeft, footRight }: Pas
           <div
             role="img"
             aria-label={`QR code for pass ${ticket.guest_number}`}
-            className={cn("size-full [&>svg]:size-full", used && "opacity-[0.12]")}
+            className={cn("size-full [&>svg]:size-full", blocked && "opacity-[0.12]")}
             dangerouslySetInnerHTML={{ __html: svg }}
           />
-          {used && (
+          {blocked && (
             <div className="absolute inset-0 flex items-center justify-center">
-              <span className="-rotate-12 border-2 border-rich/80 px-4 py-2 text-center text-[0.7rem] font-bold uppercase tracking-[0.3em] text-rich">
-                {ticket.status === "checked-in" ? (
-                  <>
-                    Admitted
-                    {ticket.checked_in_at && <span className="mt-1 block tracking-[0.2em]">{time(ticket.checked_in_at)}</span>}
-                  </>
-                ) : (
-                  "Void"
+              <span className="-rotate-12 border-2 border-rich/80 px-3 py-2 text-center text-[0.62rem] font-bold uppercase tracking-[0.22em] text-rich">
+                {standing}
+                {standing === "ALREADY USED" && ticket.checked_in_at && (
+                  <span className="mt-1 block tracking-[0.16em]">{time(ticket.checked_in_at)}</span>
                 )}
               </span>
             </div>

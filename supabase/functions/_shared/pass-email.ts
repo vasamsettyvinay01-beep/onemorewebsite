@@ -182,9 +182,13 @@ export function renderPassEmail(input: PassEmail): { subject: string; html: stri
 
     ${partnerFoot(d.partners)}
 
-    <tr><td align="center" bgcolor="${C.stock}" style="padding:6px 8px 8px;background:${C.stock};font:400 10px/1.3 ${SANS};color:${C.muted};white-space:nowrap">
-      ${door} &middot; <a href="${d.ticketsUrl}" style="color:${C.gold};text-decoration:none">View passes</a>
-      <div style="margin-top:3px;font:400 9px/1.3 ${SANS};color:${C.muted}">Non-refundable unless the event is cancelled &middot; <a href="https://theonemorecompany.com/refunds/" style="color:${C.muted}">Policy</a></div>
+    <tr><td align="center" bgcolor="${C.stock}" style="padding:8px 8px 4px;background:${C.stock}">
+      <a href="${d.ticketsUrl}" style="display:inline-block;padding:12px 22px;background:${C.gold};color:${C.stock};text-decoration:none;${caps(11, C.stock, 0.18)}">View passes</a>
+    </td></tr>
+    <tr><td align="center" bgcolor="${C.stock}" style="padding:4px 12px 8px;background:${C.stock};font:400 10px/1.45 ${SANS};color:${C.muted}">
+      ${door}
+      <div style="margin-top:6px">All ticket sales are final. Refunds are available only if the event is cancelled by The One More Company, subject to applicable law.</div>
+      <div style="margin-top:4px"><a href="https://theonemorecompany.com/refunds" style="color:${C.gold};text-decoration:none">Refund Policy</a></div>
     </td></tr>
 
   </table>
@@ -202,10 +206,11 @@ export function renderPassEmail(input: PassEmail): { subject: string; html: stri
     ...(d.partners?.length ? [`Partners: ${d.partners.map((p) => p.name).join(", ")}`, ""] : []),
     ...(d.partner && !d.partners?.length ? [`Food partner: ${d.partner}`] : []),
     ...(d.notice ? [d.notice, ""] : []),
-    `Your passes: ${d.ticketsUrl}`,
+    `View passes: ${d.ticketsUrl}`,
     "",
     "One pass per guest. Each pass is scanned once — keep them private.",
-    "Tickets are non-refundable unless the event is cancelled: https://theonemorecompany.com/refunds/",
+    "All ticket sales are final. Refunds are available only if the event is cancelled by The One More Company, subject to applicable law.",
+    "Refund Policy: https://theonemorecompany.com/refunds",
   ].join("\n");
 
   const subject = first
