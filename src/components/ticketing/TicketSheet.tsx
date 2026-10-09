@@ -62,10 +62,12 @@ export function TicketSheet({ open, event: staticEvent, onClose }: TicketSheetPr
     >
       <div
         style={themeStyle}
-        className="flex max-h-[92dvh] flex-col overflow-hidden md:grid md:h-[min(38rem,calc(100dvh-2.5rem))] md:max-h-[calc(100dvh-2.5rem)] md:grid-cols-2"
+        className="flex max-h-[92dvh] flex-col overflow-hidden md:grid md:h-[min(40rem,calc(100dvh-2.5rem))] md:max-h-[calc(100dvh-2.5rem)] md:grid-cols-[auto_minmax(0,1fr)]"
       >
         <TicketArtwork event={event} />
-        <div className="flex h-full min-h-0 flex-col px-0 py-4 md:py-6 md:pb-8 md:pl-2 md:pr-8">{content}</div>
+        <div className="flex h-full min-h-0 flex-col bg-[#0c0b0a] px-0 py-4 md:py-7 md:pb-8 md:pl-2 md:pr-8">
+          {content}
+        </div>
       </div>
       <button
         type="button"

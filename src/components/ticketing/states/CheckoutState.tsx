@@ -4,6 +4,7 @@ import { useState, type FormEvent } from "react";
 import type { OneMoreEvent, TicketTier } from "@/types/event";
 import type { CheckoutProvider } from "@/types/ticketing";
 import { formatMoney, getStartingTier, getVisibleTiers, waitingFor } from "@/lib/events";
+import { cn } from "@/lib/cn";
 import { Button } from "@/components/ui/Button";
 import { SheetHeader } from "./SheetHeader";
 
@@ -41,56 +42,81 @@ export function CheckoutState({ event, provider }: Props) {
     <form className="flex h-full min-h-0 flex-col" onSubmit={continueToCheckout} noValidate>
       <SheetHeader event={event} eyebrow="Tickets" compact />
 
-      <div className="mx-6 mt-4 flex min-h-0 flex-1 flex-col border-y border-ivory/10 py-2 sm:mx-8">
+      <div className="mt-5 flex min-h-0 flex-1 flex-col px-6 sm:px-8">
         {tiers.length > 1 ? (
-          <fieldset className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto">
-            <legend className="eyebrow mb-1 text-ivory-muted">Ticket</legend>
+          <fieldset className="flex min-h-0 flex-1 flex-col overflow-y-auto border-t border-ivory/10 [scrollbar-color:rgba(187,155,99,0.4)_transparent] [scrollbar-width:thin]">
+            <legend className="sr-only">Ticket</legend>
             {tiers.map((t) => {
               const gone = !!t.soldOut || !!t.unavailable;
               const opensAfter = waitingFor(event, t);
               const closed = gone || !!opensAfter;
+              const selected = !closed && t.id === tier.id;
               return (
-              <label key={t.id} className={`flex items-center justify-between gap-4 ${closed ? "cursor-not-allowed" : "cursor-pointer"}`}>
-                <span className="flex items-center gap-3">
+                <label
+                  key={t.id}
+                  className={cn(
+                    "group relative flex items-baseline justify-between gap-6 border-b border-ivory/[0.08] py-3 pl-4 pr-0.5 transition-colors duration-500",
+                    closed ? "cursor-not-allowed" : "cursor-pointer",
+                  )}
+                >
+                  <span
+                    aria-hidden
+                    className={cn(
+                      "absolute bottom-3 left-0 top-3 w-px bg-gold transition-opacity duration-500",
+                      selected ? "opacity-100" : "opacity-0",
+                    )}
+                  />
                   <input
                     type="radio"
                     name="tier"
-                    className="size-3.5 accent-(--ev-accent)"
-                    checked={!closed && t.id === tier.id}
+                    className="sr-only"
+                    checked={selected}
                     disabled={closed}
                     onChange={() => setTier(t)}
                   />
-                  <span className={`text-[0.78rem] uppercase tracking-[0.16em] ${closed ? "text-ivory/35" : ""}`}>
-                    {t.name}
-                    {gone && <span className="ml-2 font-semibold tracking-[0.14em] text-(--ev-accent)">Sold out</span>}
+                  <span className="min-w-0">
+                    <span
+                      className={cn(
+                        "block text-[0.7rem] font-medium uppercase tracking-[0.2em] transition-colors duration-500",
+                        closed ? "text-ivory/28" : selected ? "text-ivory" : "text-ivory/48 group-hover:text-ivory/75",
+                        "group-has-[:focus-visible]:text-ivory",
+                      )}
+                    >
+                      {t.name}
+                    </span>
+                    {gone && <span className="mt-1 block text-[0.6rem] uppercase tracking-[0.16em] text-gold/70">Sold out</span>}
                     {!gone && opensAfter && (
-                      <span className="ml-2 font-semibold tracking-[0.14em] text-ivory/45">After {opensAfter}</span>
+                      <span className="mt-1 block text-[0.6rem] uppercase tracking-[0.16em] text-ivory/38">After {opensAfter}</span>
                     )}
                   </span>
-                </span>
-                <span className={`font-display text-xl leading-none ${gone ? "text-ivory/30 line-through" : ""}`}>
-                  {formatMoney(t.priceCents, t.currency)}
-                </span>
-              </label>
+                  <span
+                    className={cn(
+                      "shrink-0 text-[0.92rem] tabular-nums tracking-[0.03em] transition-colors duration-500",
+                      gone ? "text-ivory/25 line-through" : selected ? "text-gold-soft" : "text-ivory/40 group-hover:text-ivory/60",
+                    )}
+                  >
+                    {formatMoney(t.priceCents, t.currency)}
+                  </span>
+                </label>
               );
             })}
           </fieldset>
         ) : (
-          <div className="flex items-end justify-between">
-            <span className="text-sm uppercase tracking-[0.18em]">{tier.name}</span>
-            <span className="font-display text-3xl">{formatMoney(tier.priceCents, tier.currency)}</span>
+          <div className="flex items-end justify-between border-y border-ivory/10 py-5">
+            <span className="text-[0.72rem] font-medium uppercase tracking-[0.18em]">{tier.name}</span>
+            <span className="text-2xl tabular-nums tracking-[0.04em] text-gold-soft">{formatMoney(tier.priceCents, tier.currency)}</span>
           </div>
         )}
       </div>
 
-      <div className="px-6 pt-4 sm:px-8">
-        <p className="text-[0.72rem] leading-snug text-ivory-muted">Your pass arrives the moment you book.</p>
+      <div className="mt-auto px-6 pt-5 sm:px-8">
+        <p className="text-[0.72rem] leading-relaxed tracking-[0.01em] text-ivory/45">Your pass arrives the moment you book.</p>
         {error && (
-          <p role="alert" className="pt-2 text-sm text-(--ev-accent)">
+          <p role="alert" className="pt-2 text-sm text-gold-soft">
             {error}
           </p>
         )}
-        <Button type="submit" variant="event" size="lg" className="mt-3 w-full" disabled={submitting || tier.soldOut || tier.unavailable}>
+        <Button type="submit" variant="gold" size="lg" arrow className="mt-4 w-full" disabled={submitting || tier.soldOut || tier.unavailable}>
           {submitting ? "Processing…" : "Continue to payment"}
         </Button>
       </div>

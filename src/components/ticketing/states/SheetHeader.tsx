@@ -16,9 +16,11 @@ export function SheetHeader({
   compact?: boolean;
 }) {
   const facts = getEventFacts(event).filter((f) => !(omitPlace && f.label === "WHERE"));
+  const when = facts.filter((f) => f.label === "DATE" || f.label === "TIME").map((f) => f.value);
+  const where = facts.filter((f) => f.label === "WHERE" || f.label === "AGE").map((f) => f.value);
   return (
-    <header aria-hidden className="px-6 pt-4 sm:px-8 md:px-8 md:pt-0">
-      <p className="eyebrow flex items-center gap-3 text-(--ev-accent)">
+    <header aria-hidden className="px-6 pt-3 sm:px-8 md:px-8 md:pt-1">
+      <p className="eyebrow flex items-center gap-3 text-gold-soft">
         {event.chapter !== undefined && (
           <>
             <span>{formatChapter(event.chapter, true)}</span>
@@ -27,13 +29,24 @@ export function SheetHeader({
         )}
         <span>{eyebrow}</span>
       </p>
-      <p className={compact ? "mt-2 font-display text-[1.85rem] leading-[0.92] text-ivory md:text-[2.15rem]" : "mt-3 font-display text-[2.25rem] leading-[0.92] text-ivory md:text-[2.75rem]"}>
+      <p
+        className={
+          compact
+            ? "mt-2.5 font-event text-[2.35rem] text-ivory md:text-[2.65rem]"
+            : "mt-3 font-event text-[2.55rem] text-ivory md:text-[3rem]"
+        }
+      >
         {event.name}
       </p>
-      {facts.length > 0 && (
-        <p className="mt-2 text-[0.62rem] uppercase tracking-[0.12em] text-ivory-muted sm:text-[0.68rem] sm:tracking-[0.14em]">
-          {facts.map((f) => f.value).join("  ·  ")}
-        </p>
+      {(when.length > 0 || where.length > 0) && (
+        <div className={compact ? "mt-3 space-y-1" : "mt-4 space-y-1.5"}>
+          {when.length > 0 && (
+            <p className="text-[0.68rem] font-medium uppercase tracking-[0.18em] text-ivory/55">{when.join("  ·  ")}</p>
+          )}
+          {where.length > 0 && (
+            <p className="text-[0.68rem] font-medium uppercase tracking-[0.18em] text-ivory/38">{where.join("  ·  ")}</p>
+          )}
+        </div>
       )}
     </header>
   );
