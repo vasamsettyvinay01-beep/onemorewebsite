@@ -5,6 +5,8 @@ ErrorDocument 404 /404.html
 # Pages export as /tickets.html etc.; serve them at /tickets and /tickets/ (query string kept).
 <IfModule mod_rewrite.c>
   RewriteEngine On
+  # Apple Pay checks this file directly. Do not rewrite it to an HTML page.
+  RewriteRule ^\.well-known/ - [L]
   RewriteCond %{REQUEST_URI} ^/(.+?)/?$
   RewriteCond %{DOCUMENT_ROOT}/%1.html -f
   RewriteRule ^(.+?)/?$ /$1.html [L]
@@ -14,6 +16,9 @@ ErrorDocument 404 /404.html
 <FilesMatch "^(opengraph-image|twitter-image|apple-icon)$">
   ForceType image/png
 </FilesMatch>
+<Files "apple-developer-merchantid-domain-association">
+  ForceType application/octet-stream
+</Files>
 
 <IfModule mod_deflate.c>
   AddOutputFilterByType DEFLATE text/html text/plain text/css application/javascript application/json image/svg+xml
