@@ -7,13 +7,11 @@ export const BLOCKED_ACTIONS = [
   "resume_sales",
   "cancel_preview",
   "cancel_confirm",
-  "refund_preview",
-  "refund_one",
   "resend",
   "alerts",
-  "staff_list",
-  "staff_set",
 ];
+
+export const OPEN_MUTATIONS = ["refund_preview", "refund_one", "staff_list", "staff_set"];
 
 export const READ_ACTIONS = [
   "whoami",
@@ -39,6 +37,39 @@ export function isBlockedAction(action) {
 
 export function isReadAction(action) {
   return READ_ACTIONS.includes(action);
+}
+
+export function isOpenMutation(action) {
+  return OPEN_MUTATIONS.includes(action);
+}
+
+// A super admin can refund a paid card charge. An admin can refund only after
+// the event itself has been cancelled. The phrase is checked separately.
+export function refundBlockReason({ role, eventStatus, orderStatus, charged }) {
+  if (role !== "super_admin" && !(role === "admin" && eventStatus === "cancelled")) {
+    return "An admin can refund only after the event is cancelled.";
+  }
+  if (!charged) return "This order has no card charge to refund.";
+  if (orderStatus === "refunded" || orderStatus === "partially-refunded") return "This order already has a refund.";
+  if (orderStatus === "disputed") return "This payment is disputed.";
+  if (orderStatus !== "paid") return "Only a paid order can be refunded.";
+  return null;
+}
+
+export function refundPhraseOk(value) {
+  return value === "REFUND";
+}
+
+export function parseStaffEmail(value) {
+  if (typeof value !== "string") return null;
+  const email = value.trim().toLowerCase();
+  if (email.length > 320 || !/^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/.test(email)) return null;
+  return email;
+}
+
+export function parseStaffRole(value) {
+  if (value === "admin" || value === "door_staff" || value === "remove") return value;
+  return null;
 }
 
 export function isLegacyDoorAccount(email, extra = "") {

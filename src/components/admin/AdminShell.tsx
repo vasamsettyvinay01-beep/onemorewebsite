@@ -36,9 +36,6 @@ const NAV = [
   { href: "/admin/tickets", label: "Tickets" },
   { href: "/admin/check-in", label: "Check-in" },
   { href: "/admin/audit", label: "Audit" },
-];
-
-const LATER = [
   { href: "/admin/refunds", label: "Refunds" },
   { href: "/admin/staff", label: "Staff" },
 ];
@@ -297,15 +294,6 @@ export function AdminShell({ children }: { children: ReactNode }) {
               return (
                 <Link key={item.href} href={item.href} className={cn("shrink-0 rounded-md px-2.5 py-2 text-sm", active ? "bg-white/10 text-white" : "text-white/65 hover:bg-white/5")}>
                   {item.label}
-                </Link>
-              );
-            })}
-            {LATER.map((item) => {
-              const active = pathname.startsWith(item.href);
-              return (
-                <Link key={item.href} href={item.href} className={cn("flex shrink-0 items-center justify-between gap-2 rounded-md px-2.5 py-2 text-sm", active ? "bg-white/10" : "text-white/45 hover:bg-white/5")}>
-                  {item.label}
-                  <span className="text-[0.6rem] uppercase tracking-wide text-white/35">Off</span>
                 </Link>
               );
             })}

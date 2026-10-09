@@ -1,6 +1,6 @@
 // Authoritative staff permissions. Roles come from staff_roles, never from the browser.
-// Stage D deploys read actions only. Mutation actions stay in this matrix for a later
-// confirmed release, and the admin function rejects them until then.
+// Refunds and staff assignment follow this matrix. Cancellation, sales pause,
+// resend, and alerts stay rejected in the admin function.
 
 export const ROLES = ["super_admin", "admin", "door_staff"];
 

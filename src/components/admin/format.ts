@@ -40,5 +40,6 @@ export function inRange(date: string, today: string, range: "today" | "7d" | "al
 export function roleLabel(role: string): string {
   if (role === "super_admin") return "Super admin";
   if (role === "admin") return "Admin";
+  if (role === "door_staff") return "Door staff";
   return role;
 }

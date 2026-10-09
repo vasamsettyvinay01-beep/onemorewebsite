@@ -1,15 +1,18 @@
-// Read-only operations API. A caller must be a Supabase Auth user with a
-// staff_roles role of admin or super_admin, and an authenticator session (aal2).
-// The legacy door login is not an admin credential. Role is resolved here.
-// Refunds, cancellation, price changes, and staff changes are rejected.
+// Operations API. A caller must be a Supabase Auth user with a staff_roles role
+// of admin or super_admin, and an authenticator session (aal2). The legacy door
+// login is not an admin credential. Role is resolved here. A super admin can
+// refund one paid order and assign staff. Cancellation stays rejected.
 
+import Stripe from "npm:stripe@17";
 import { admin, corsHeaders, json } from "../_shared/http.ts";
 import {
+  canAssignRole,
   permit,
   rateLimitAllows,
   rateLimitFor,
   requiresMfa,
   resolveRole,
+  roleAuditAction,
   sanitizeAuditSummary,
 } from "../_shared/staff-auth.mjs";
 import {
@@ -21,6 +24,7 @@ import {
   emailLabel,
   isBlockedAction,
   isLegacyDoorAccount,
+  isOpenMutation,
   isReadAction,
   likePattern,
   orderRefFromId,
@@ -31,11 +35,15 @@ import {
   parsePage,
   parsePaymentStatus,
   parseRefundStatus,
+  parseStaffEmail,
+  parseStaffRole,
   parseTicketRef,
   parseTicketStatus,
   parseTierId,
   redactAudit,
+  refundBlockReason,
   refundLabel,
+  refundPhraseOk,
   safeResource,
   splitCharge,
   ticketRefFromId,
@@ -119,7 +127,9 @@ Deno.serve(async (req) => {
     await audit(actor, "admin_mutation_rejected", "admin", action, {}, ip, ua);
     return json(req, { error: "This action is not available.", code: "not_available" }, 403);
   }
-  if (!permit(actor.role, action) || !isReadAction(action)) return json(req, { error: "Not authorised" }, 403);
+  if (!permit(actor.role, action) || (!isReadAction(action) && !isOpenMutation(action))) {
+    return json(req, { error: "Not authorised" }, 403);
+  }
   if (requiresMfa(actor.role) && actor.aal !== "aal2") {
     return json(req, { error: "Multi-factor authentication is required.", code: "mfa_required" }, 403);
   }
@@ -146,6 +156,14 @@ Deno.serve(async (req) => {
         return asResult(req, await sales(textEvent(body)));
       case "audit":
         return asResult(req, await auditPage(body));
+      case "refund_preview":
+        return asResult(req, await refundPreview(actor, body));
+      case "refund_one":
+        return asResult(req, await refundOrder(actor, body, ip, ua));
+      case "staff_list":
+        return asResult(req, await staffList(actor));
+      case "staff_set":
+        return asResult(req, await staffSet(actor, body, ip, ua));
       default:
         return json(req, { error: "Unknown action" }, 400);
     }
@@ -809,8 +827,195 @@ async function idsWithPrefix(table: "orders" | "tickets", eventId: string, prefi
   return matches;
 }
 
-// Stage D does not call these. The checks stay in source so a later release
-// still has to match a server-side event name and the order's own event.
+interface RefundRow {
+  id: string;
+  event_id: string;
+  tier_name: string;
+  purchaser_name: string | null;
+  purchaser_email: string;
+  amount_total: number;
+  currency: string;
+  status: string;
+  stripe_payment_intent: string | null;
+  is_test: boolean;
+}
+
+async function loadRefundOrder(eventId: string, ref: string | null): Promise<RefundRow | null> {
+  if (!ref) return null;
+  const ids = await idsWithPrefix("orders", eventId, ref);
+  if (ids.length !== 1) return null;
+  const { data, error } = await admin
+    .from("orders")
+    .select("id, event_id, tier_name, purchaser_name, purchaser_email, amount_total, currency, status, stripe_payment_intent, is_test")
+    .eq("id", ids[0])
+    .eq("event_id", eventId)
+    .eq("is_test", false)
+    .maybeSingle();
+  if (error) throw error;
+  return (data as RefundRow | null) ?? null;
+}
+
+async function refundPreview(actor: Actor, body: Record<string, unknown>) {
+  const eventId = textEvent(body);
+  if (!eventId) return { error: "eventId required" };
+  const order = await loadRefundOrder(eventId, parseOrderRef(body.ref));
+  if (!order || order.event_id !== String(body.eventId ?? "")) return { error: "Order not found" };
+  const ops = await eventOps(eventId);
+  const { data: tickets, error } = await admin.from("tickets").select("status").eq("order_id", order.id).eq("event_id", eventId);
+  if (error) throw error;
+  const rows = tickets ?? [];
+  const reason = refundBlockReason({
+    role: actor.role,
+    eventStatus: ops?.status ?? "open",
+    orderStatus: order.status,
+    charged: Boolean(order.stripe_payment_intent),
+  });
+  return {
+    ref: orderRefFromId(order.id),
+    purchaser: order.purchaser_name,
+    email: order.purchaser_email,
+    tier: order.tier_name,
+    total: order.amount_total,
+    currency: order.currency,
+    passes: rows.length,
+    checkedIn: rows.filter((ticket) => ticket.status === "checked-in").length,
+    refundable: reason == null,
+    reason,
+  };
+}
+
+async function refundOrder(actor: Actor, body: Record<string, unknown>, ip: string, ua: string) {
+  const eventId = textEvent(body);
+  if (!eventId) return { error: "eventId required" };
+  const order = await loadRefundOrder(eventId, parseOrderRef(body.ref));
+  if (!order || order.event_id !== String(body.eventId ?? "")) return { error: "Order not found" };
+  if (!refundPhraseOk(body.confirm)) return { error: "Type REFUND to confirm." };
+  const ops = await eventOps(eventId);
+  const reason = refundBlockReason({
+    role: actor.role,
+    eventStatus: ops?.status ?? "open",
+    orderStatus: order.status,
+    charged: Boolean(order.stripe_payment_intent),
+  });
+  if (reason) return { error: reason };
+  const paymentIntent = order.stripe_payment_intent;
+  if (!paymentIntent) return { error: "This order has no card charge to refund." };
+  const stripeError = await createCardRefund(paymentIntent, order.id);
+  if (stripeError) return { error: stripeError };
+  const { error } = await admin.rpc("cancel_order_by_payment_intent", {
+    p_payment_intent: paymentIntent,
+    p_full: true,
+  });
+  if (error) return { error: "The card was refunded, but the pass was not updated. Try again." };
+  await audit(actor, "ORDER_REFUNDED", "order", order.id, {
+    ref: orderRefFromId(order.id),
+    amount_total: order.amount_total,
+    currency: order.currency,
+  }, ip, ua);
+  return { ok: true, ref: orderRefFromId(order.id), status: "refunded" };
+}
+
+async function createCardRefund(paymentIntent: string, orderId: string): Promise<string | null> {
+  const key = Deno.env.get("STRIPE_SECRET_KEY");
+  if (!key) return "Refunds are not configured.";
+  const stripe = new Stripe(key, { httpClient: Stripe.createFetchHttpClient() });
+  try {
+    await stripe.refunds.create({ payment_intent: paymentIntent }, { idempotencyKey: `omc-admin-refund-${orderId}` });
+    return null;
+  } catch (err) {
+    const message = (err as Error).message ?? "";
+    if (/already been refunded|charge_already_refunded/i.test(message)) return null;
+    console.error(JSON.stringify({ msg: "admin_refund_failed", error: message.slice(0, 200) }));
+    return "The card refund did not go through.";
+  }
+}
+
+async function staffList(actor: Actor) {
+  const { data, error } = await admin.from("staff_roles").select("email, role").order("email");
+  if (error) throw error;
+  return {
+    staff: (data ?? []).map((person) => ({
+      email: person.email as string,
+      role: person.role as string,
+      you: String(person.email).toLowerCase() === actor.email,
+    })),
+  };
+}
+
+async function staffSet(actor: Actor, body: Record<string, unknown>, ip: string, ua: string) {
+  const email = parseStaffEmail(body.email);
+  const nextRole = parseStaffRole(body.staffRole);
+  if (!email || !nextRole) return { error: "A valid email and role are required." };
+  if (isLegacyDoorAccount(email, Deno.env.get("DOOR_EMAILS") ?? "")) return { error: "That account stays on the scanner only." };
+  if (email === actor.email) return { error: "You cannot change your own role." };
+  if (nextRole === "remove") return removeStaff(actor, email, ip, ua);
+
+  let user = await authUserByEmail(email);
+  let invited = false;
+  if (!user) {
+    const created = await inviteStaff(email);
+    if (typeof created === "string") return { error: created };
+    user = created;
+    invited = true;
+  }
+  const [{ data: existing, error: existingError }, { count, error: countError }] = await Promise.all([
+    admin.from("staff_roles").select("user_id, role").eq("user_id", user.id).maybeSingle(),
+    admin.from("staff_roles").select("user_id", { count: "exact", head: true }).eq("role", "super_admin"),
+  ]);
+  if (existingError || countError) throw existingError ?? countError;
+  const denied = canAssignRole({
+    actorId: actor.id,
+    actorRole: actor.role,
+    targetId: user.id,
+    currentRole: existing?.role ?? null,
+    nextRole,
+    superAdminCount: count ?? 0,
+  });
+  if (denied) return { error: denied };
+  const saved = await admin.from("staff_roles").upsert({ user_id: user.id, email, role: nextRole }, { onConflict: "user_id" });
+  if (saved.error) return { error: "That email is already assigned." };
+  await audit(actor, roleAuditAction(existing?.role ?? null), "staff", user.id, { email, role: nextRole }, ip, ua);
+  return { ok: true, email, role: nextRole, invited };
+}
+
+async function removeStaff(actor: Actor, email: string, ip: string, ua: string) {
+  const { data, error } = await admin.from("staff_roles").select("user_id, role").eq("email", email).maybeSingle();
+  if (error) throw error;
+  if (!data) return { error: "That person has no staff role." };
+  if (data.user_id === actor.id) return { error: "You cannot change your own role." };
+  if (data.role === "super_admin") return { error: "A super admin role cannot be changed here." };
+  const removed = await admin.from("staff_roles").delete().eq("user_id", data.user_id).neq("role", "super_admin");
+  if (removed.error) throw removed.error;
+  await audit(actor, "STAFF_ROLE_REMOVED", "staff", data.user_id, { email, role: data.role }, ip, ua);
+  return { ok: true, email, role: "remove" };
+}
+
+async function authUserByEmail(email: string): Promise<{ id: string } | null> {
+  for (let page = 1; page <= 20; page += 1) {
+    const { data, error } = await admin.auth.admin.listUsers({ page, perPage: 200 });
+    if (error) throw error;
+    const found = data.users.find((user) => user.email?.toLowerCase() === email);
+    if (found?.id) return { id: found.id };
+    if (data.users.length < 200) return null;
+  }
+  return null;
+}
+
+async function inviteStaff(email: string): Promise<{ id: string } | string> {
+  const site = (Deno.env.get("SITE_URL") || "https://theonemorecompany.com").replace(/\/$/, "");
+  const { data, error } = await admin.auth.admin.inviteUserByEmail(email, {
+    redirectTo: `${site}/auth/setup`,
+  });
+  if (error || !data.user?.id) {
+    const again = await authUserByEmail(email);
+    if (again) return again;
+    return "Could not invite that email.";
+  }
+  return { id: data.user.id };
+}
+
+// Cancellation stays off. The name check stays in source so a later release
+// still has to match a server-side event name, not a name the browser sends.
 async function cancelConfirm(body: Record<string, unknown>) {
   throw new Error("mutations_disabled");
   const eventId = String(body.eventId ?? "");
@@ -820,15 +1025,7 @@ async function cancelConfirm(body: Record<string, unknown>) {
   return { error: "This action is not available." };
 }
 
-async function refundOne(body: Record<string, unknown>) {
-  throw new Error("mutations_disabled");
-  const { data: order } = await admin.from("orders").select("event_id").limit(0).maybeSingle();
-  if (!order || order.event_id !== String(body.eventId ?? "")) return { error: "Order not found." };
-  return { error: "This action is not available." };
-}
-
 void cancelConfirm;
-void refundOne;
 
 async function audit(
   actor: { id: string; role: string } | null,

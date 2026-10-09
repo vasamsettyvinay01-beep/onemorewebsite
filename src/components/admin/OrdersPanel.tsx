@@ -218,6 +218,11 @@ function OrderDetailView({ eventId, refCode }: { eventId: string; refCode: strin
             <Item label="Created" value={when(detail.order.createdAt)} />
             <Item label="Email status" value={detail.order.emailStatus} />
           </dl>
+          {detail.order.paymentStatus === "paid" && (
+            <Link href={`/admin/refunds?ref=${detail.order.ref}`} className="inline-block text-sm text-white/70 underline-offset-2 hover:underline">
+              Refund this order
+            </Link>
+          )}
           <section className="rounded-lg border border-white/10 bg-[#171916] p-3">
             <h2 className="text-sm font-semibold">Passes</h2>
             {detail.tickets.length === 0 ? (
