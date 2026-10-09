@@ -33,9 +33,10 @@ async function handle(req: Request): Promise<Response> {
   const quantity = Number(body.quantity);
   const name = String(body.name ?? "").trim().slice(0, 120);
   const email = String(body.email ?? "").trim().toLowerCase().slice(0, 200);
+  const quote = body.quote === true;
   if (!Number.isInteger(quantity) || quantity < 1) return json(req, { error: "Choose how many passes." }, 400);
-  if (name.length < 2) return json(req, { error: "Enter the name for the booking." }, 400);
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return json(req, { error: "Enter a valid email." }, 400);
+  if (!quote && name.length < 2) return json(req, { error: "Enter the name for the booking." }, 400);
+  if (!quote && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return json(req, { error: "Enter a valid email." }, 400);
 
   const { data: tier, error } = await admin
     .from("tiers")
@@ -74,7 +75,7 @@ async function handle(req: Request): Promise<Response> {
   const unit = price?.unit_amount ?? tier.price_cents;
   const currency = price?.currency ?? tier.currency;
   const productName = `${meta.omc_event_name ?? eventId} · ${tier.name}`;
-  // Ticket tax is based on the venue, and the listed price already includes it.
+  // Ticket tax is based on the venue and added on top of the listed price.
   const calculation = await stripe.tax.calculations.create({
     currency,
     customer_details: {
@@ -85,12 +86,16 @@ async function handle(req: Request): Promise<Response> {
       {
         amount: unit * quantity,
         reference: tierId,
-        tax_behavior: "inclusive",
+        tax_behavior: "exclusive",
         tax_code: "txcd_50010001",
         performance_location: "taxloc_1UOYi1FhhmOQLzPEyZNgpBcS",
       },
     ],
   });
+  const tax = calculation.tax_amount_exclusive;
+  if (quote) {
+    return json(req, { subtotal: unit * quantity, tax, total: calculation.amount_total, currency });
+  }
   const intent = await stripe.paymentIntents.create({
     amount: calculation.amount_total,
     currency,
@@ -118,6 +123,7 @@ async function handle(req: Request): Promise<Response> {
           product_code: tierId.replace(/[^a-z0-9]/gi, "").slice(0, 12),
           unit_cost: unit,
           quantity,
+          tax: { total_tax_amount: tax },
         },
       ],
     },

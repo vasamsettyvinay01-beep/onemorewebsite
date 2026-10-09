@@ -159,9 +159,32 @@ function CheckoutCard({ event, initialTier }: { event: OneMoreEvent; initialTier
   const [error, setError] = useState<string | null>(null);
   const [express, setExpress] = useState(true);
 
+  const [quote, setQuote] = useState<{ key: string; tax: number; total: number } | null>(null);
+
   const maxQty = Math.min(tier?.maxPerOrder ?? 10, 10);
   const qty = Math.min(quantity, maxQty);
-  const total = (tier?.priceCents ?? 0) * qty;
+  const subtotal = (tier?.priceCents ?? 0) * qty;
+  const quoteKey = `${tier?.id}:${qty}`;
+  const priced = quote?.key === quoteKey ? quote : null;
+  const total = priced?.total ?? subtotal;
+
+  useEffect(() => {
+    if (!tier) return;
+    let stale = false;
+    fetch(functionUrl("checkout"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ eventId: event.id, tierId: tier.id, quantity: qty, quote: true }),
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((body) => {
+        if (!stale && body && typeof body.total === "number") setQuote({ key: quoteKey, tax: body.tax, total: body.total });
+      })
+      .catch(() => {});
+    return () => {
+      stale = true;
+    };
+  }, [event.id, tier, qty, quoteKey]);
 
   useEffect(() => {
     if (total > 0) elements?.update({ amount: total });
@@ -203,7 +226,7 @@ function CheckoutCard({ event, initialTier }: { event: OneMoreEvent; initialTier
 
   async function payByCard(e: FormEvent) {
     e.preventDefault();
-    if (!stripe || !elements || busy) return;
+    if (!stripe || !elements || busy || !priced) return;
     if (!valid) {
       setError("Add the name and email for your passes.");
       return;
@@ -224,7 +247,10 @@ function CheckoutCard({ event, initialTier }: { event: OneMoreEvent; initialTier
     setError(null);
     e.resolve({
       emailRequired: true,
-      lineItems: [{ name: `${event.name} · ${tier!.name} × ${qty}`, amount: total }],
+      lineItems: [
+        { name: `${event.name} · ${tier!.name} × ${qty}`, amount: subtotal },
+        ...(priced ? [{ name: "Sales tax", amount: priced.tax }] : []),
+      ],
     });
   }
 
@@ -330,6 +356,11 @@ function CheckoutCard({ event, initialTier }: { event: OneMoreEvent; initialTier
                 </Stepper>
               </div>
             </div>
+
+            <p className="mt-2 flex items-center justify-between text-[0.72rem] text-ivory/50">
+              <span className="eyebrow text-ivory/45">Sales tax</span>
+              <span>{priced ? formatMoney(priced.tax, tier.currency) : "Calculating…"}</span>
+            </p>
           </div>
 
           <div className={cn(!locked && "lg:border-l lg:border-ivory/10 lg:pl-10")}>
@@ -400,7 +431,7 @@ function CheckoutCard({ event, initialTier }: { event: OneMoreEvent; initialTier
         <div className={cn(!locked && "lg:pl-10")}>
           <button
             type="submit"
-            disabled={!stripe || busy}
+            disabled={!stripe || busy || !priced}
             className="h-12 w-full rounded-[2px] bg-gold text-[0.68rem] font-semibold uppercase tracking-[0.18em] text-rich transition-colors duration-500 hover:bg-gold-soft disabled:cursor-wait disabled:opacity-50"
           >
             {busy ? "Securing your passes…" : `Book · ${totalLabel}`}
