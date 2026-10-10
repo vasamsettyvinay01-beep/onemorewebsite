@@ -7,6 +7,7 @@ import { loadStripe, type Appearance, type StripeElementsOptions } from "@stripe
 import { Elements, ExpressCheckoutElement, PaymentElement, useElements, useStripe } from "@stripe/react-stripe-js";
 import type { StripeExpressCheckoutElementClickEvent, StripeExpressCheckoutElementConfirmEvent } from "@stripe/stripe-js";
 import { brand } from "@/data/brand";
+import { PolicyAck } from "@/components/checkout/PolicyAck";
 import { backend, backendConfigured, functionUrl } from "@/data/backend";
 import { useLiveEvent } from "@/lib/availability";
 import { formatChapter, formatEventTime, formatMoney, getEventBySlug, getVisibleTiers, isOnSale, waitingFor } from "@/lib/events";
@@ -158,6 +159,7 @@ function CheckoutCard({ event, initialTier }: { event: OneMoreEvent; initialTier
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [express, setExpress] = useState(true);
+  const [agreed, setAgreed] = useState(false);
   const phase = useRef<"idle" | "wallet" | "paying">("idle");
   const idempotencyKey = useRef<string | null>(null);
   const attempt = useRef("");
@@ -257,6 +259,10 @@ function CheckoutCard({ event, initialTier }: { event: OneMoreEvent; initialTier
       setError("Add the name and email for your passes.");
       return;
     }
+    if (!agreed) {
+      setError("Confirm that ticket sales are final before you pay.");
+      return;
+    }
     phase.current = "paying";
     setBusy(true);
     setError(null);
@@ -275,6 +281,11 @@ function CheckoutCard({ event, initialTier }: { event: OneMoreEvent; initialTier
   }
 
   function onExpressClick(e: StripeExpressCheckoutElementClickEvent) {
+    if (!agreed) {
+      setError("Confirm that ticket sales are final before you pay.");
+      e.reject();
+      return;
+    }
     if (!priced || phase.current !== "idle") {
       e.reject();
       return;
@@ -483,17 +494,12 @@ function CheckoutCard({ event, initialTier }: { event: OneMoreEvent; initialTier
         <div className={cn(!locked && "lg:pl-10")}>
           <button
             type="submit"
-            disabled={!stripe || busy || !priced}
+            disabled={!stripe || busy || !priced || !agreed}
             className="h-12 w-full rounded-[2px] bg-gold text-[0.68rem] font-semibold uppercase tracking-[0.18em] text-rich transition-colors duration-500 hover:bg-gold-soft disabled:cursor-wait disabled:opacity-50"
           >
             {busy ? "Securing your passes…" : `Book · ${totalLabel}`}
           </button>
-          <p className="mt-2 text-center text-[0.68rem] text-ivory/50">
-            All sales final. No refunds unless the event is cancelled.{" "}
-            <a href="/refunds/" target="_blank" className="text-gold/80 underline-offset-2 hover:underline">
-              Policy
-            </a>
-          </p>
+          <PolicyAck agreed={agreed} onChange={setAgreed} />
         </div>
       </div>
 

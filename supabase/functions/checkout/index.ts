@@ -43,6 +43,8 @@ async function handle(req: Request): Promise<Response> {
   const email = String(body.email ?? "").trim().toLowerCase().slice(0, 200);
   const quote = body.quote === true;
   if (!ID_RE.test(eventId) || !ID_RE.test(tierId)) return json(req, { error: "This pass isn't available." }, 404);
+  const closed = await salesClosed(eventId);
+  if (closed) return json(req, { error: closed }, 409);
   if (!Number.isInteger(quantity) || quantity < 1 || quantity > 20) return json(req, { error: "Choose how many passes." }, 400);
   if (!quote && name.length < 2) return json(req, { error: "Enter the name for the booking." }, 400);
   if (!quote && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return json(req, { error: "Enter a valid email." }, 400);
@@ -223,6 +225,16 @@ async function countSold(eventId: string, tierId: string): Promise<number> {
   const { data, error } = await admin.rpc("tier_sold", { p_event_id: eventId, p_tier_id: tierId });
   if (error) throw error;
   return Number(data ?? 0);
+}
+
+async function salesClosed(eventId: string): Promise<string | null> {
+  const { data, error } = await admin.from("event_ops").select("status").eq("event_id", eventId).maybeSingle();
+  if (error) {
+    if (/event_ops|schema cache|does not exist/i.test(error.message)) return null;
+    throw error;
+  }
+  if (!data || data.status === "open") return null;
+  return data.status === "cancelled" ? "This event has been cancelled." : "Ticket sales are paused.";
 }
 
 async function countCommitted(eventId: string, tierId: string): Promise<number> {
