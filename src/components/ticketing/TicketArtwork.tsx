@@ -15,7 +15,7 @@ export function TicketArtwork({ event }: { event: OneMoreEvent }) {
   const mobileArt = event.ticketArtworkMobile ?? art;
 
   return (
-    <div className="relative h-[8.75rem] shrink-0 overflow-hidden sm:h-[10.5rem] md:h-full md:w-[calc(min(40rem,100dvh-2.5rem)*665/1024)] md:shrink-0">
+    <div className="relative h-[7.25rem] shrink-0 overflow-hidden short:h-24 sm:h-[10.5rem] md:h-full md:w-[calc(min(40rem,100dvh-2.5rem)*665/1024)] md:shrink-0">
       {art.src ? (
         <motion.div
           className="absolute inset-0"

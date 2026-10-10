@@ -42,10 +42,9 @@ export function CheckoutState({ event, provider }: Props) {
     <form className="flex h-full min-h-0 flex-col" onSubmit={continueToCheckout} noValidate>
       <SheetHeader event={event} eyebrow="Tickets" compact />
 
-      <div className="mt-5 flex min-h-0 flex-1 flex-col px-6 sm:px-8">
+      <div className="mt-4 min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 [scrollbar-color:rgba(187,155,99,0.4)_transparent] [scrollbar-width:thin] sm:px-8">
         {tiers.length > 1 ? (
-          <fieldset className="flex min-h-0 flex-1 flex-col overflow-y-auto border-t border-ivory/10 [scrollbar-color:rgba(187,155,99,0.4)_transparent] [scrollbar-width:thin]">
-            <legend className="sr-only">Ticket</legend>
+          <div role="radiogroup" aria-label="Ticket" className="border-t border-ivory/10 pb-1">
             {tiers.map((t) => {
               const gone = !!t.soldOut || !!t.unavailable;
               const opensAfter = waitingFor(event, t);
@@ -100,7 +99,7 @@ export function CheckoutState({ event, provider }: Props) {
                 </label>
               );
             })}
-          </fieldset>
+          </div>
         ) : (
           <div className="flex items-end justify-between border-y border-ivory/10 py-5">
             <span className="text-[0.72rem] font-medium uppercase tracking-[0.18em]">{tier.name}</span>
@@ -109,7 +108,7 @@ export function CheckoutState({ event, provider }: Props) {
         )}
       </div>
 
-      <div className="mt-auto px-6 pt-5 sm:px-8">
+      <div className="relative z-10 shrink-0 bg-[#0c0b0a] px-6 pb-[max(0.25rem,env(safe-area-inset-bottom))] pt-4 sm:px-8">
         <p className="text-[0.72rem] leading-relaxed tracking-[0.01em] text-ivory/45">Your pass arrives the moment you book.</p>
         {error && (
           <p role="alert" className="pt-2 text-sm text-gold-soft">
