@@ -4,7 +4,7 @@
 
 import Stripe from "npm:stripe@17";
 import { admin } from "../_shared/http.ts";
-import { readPartners, sendTicketEmail } from "../_shared/email.ts";
+import { readPartners, sendSaleNotification, sendTicketEmail } from "../_shared/email.ts";
 import { quoteTicketTotal } from "../_shared/pricing.ts";
 
 const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY")!, { httpClient: Stripe.createFetchHttpClient() });
@@ -142,7 +142,7 @@ async function fulfil(paymentIntentId: string, sessionId?: string) {
     return;
   }
   if (!row.order_id) return;
-  await emailOrder(row.order_id, meta, email);
+  await emailOrder(row.order_id, paymentIntentId, meta, email);
 }
 
 async function refundAndStop(paymentIntentId: string, reason: string) {
@@ -159,10 +159,10 @@ async function refundAndStop(paymentIntentId: string, reason: string) {
   await admin.rpc("cancel_order_by_payment_intent", { p_payment_intent: paymentIntentId, p_full: true });
 }
 
-async function emailOrder(orderId: string, meta: Stripe.Metadata, email: string) {
+async function emailOrder(orderId: string, paymentIntentId: string, meta: Stripe.Metadata, email: string) {
   const { data: order, error: orderErr } = await admin
     .from("orders")
-    .select("status, access_token, emailed_at, purchaser_name, tier_name, tickets(guest_number, token, status)")
+    .select("status, access_token, emailed_at, purchaser_name, purchaser_email, tier_name, quantity, amount_total, currency, tickets(guest_number, token, status)")
     .eq("id", orderId)
     .single();
   if (orderErr) throw orderErr;
@@ -198,6 +198,23 @@ async function emailOrder(orderId: string, meta: Stripe.Metadata, email: string)
       tickets,
     });
     console.log(JSON.stringify({ msg: "email_sent", orderId, tickets: tickets.length }));
+    try {
+      await sendSaleNotification({
+        orderId,
+        paymentIntentId,
+        eventName: meta.omc_event_name ?? "One More",
+        purchaserName: order.purchaser_name,
+        purchaserEmail: order.purchaser_email ?? email,
+        tierName: order.tier_name,
+        quantity: order.quantity,
+        guestCount: tickets.length,
+        amountTotal: order.amount_total,
+        currency: order.currency,
+      });
+      console.log(JSON.stringify({ msg: "sale_notification_sent", orderId }));
+    } catch (err) {
+      console.error(JSON.stringify({ msg: "sale_notification_failed", orderId, error: (err as Error).message?.slice(0, 240) }));
+    }
   } catch (err) {
     await admin.from("orders").update({ emailed_at: null }).eq("id", orderId);
     throw err;

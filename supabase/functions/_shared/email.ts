@@ -28,7 +28,29 @@ export type TicketEmail = Omit<PassEmail, "passes" | "ticketsUrl" | "sealUrl"> &
   tickets: { guest_number: number; token: string }[];
 };
 
+export interface SaleNotification {
+  orderId: string;
+  paymentIntentId: string;
+  eventName: string;
+  purchaserName: string | null;
+  purchaserEmail: string;
+  tierName: string;
+  quantity: number;
+  guestCount: number;
+  amountTotal: number;
+  currency: string;
+}
+
 const BRAND_ASSETS = `${Deno.env.get("SUPABASE_URL")}/storage/v1/object/public/brand`;
+const esc = (value: string) =>
+  value.replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]!);
+
+function money(cents: number, currency: string): string {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: currency.toUpperCase(),
+  }).format(cents / 100);
+}
 
 export function qrPng(token: string): Promise<string> {
   return QRCode.toDataURL(token, {
@@ -75,4 +97,48 @@ export async function sendTicketEmail(t: TicketEmail): Promise<void> {
     }),
   });
   if (!res.ok) throw new Error(`Resend ${res.status}: ${await res.text()}`);
+}
+
+/** Sends the owner a compact receipt whenever a paid order is fulfilled. */
+export async function sendSaleNotification(sale: SaleNotification): Promise<void> {
+  const apiKey = Deno.env.get("RESEND_API_KEY");
+  const from = Deno.env.get("TICKETS_FROM_EMAIL");
+  const to = Deno.env.get("SALES_NOTIFICATION_EMAIL");
+  if (!apiKey || !from || !to) throw new Error("Sale notification email secrets not set");
+
+  const total = money(sale.amountTotal, sale.currency);
+  const buyer = sale.purchaserName?.trim() || "Guest";
+  const subject = `New ticket sale — ${sale.quantity} × ${sale.tierName} — ${total}`;
+  const rows = [
+    ["Event", sale.eventName],
+    ["Buyer", buyer],
+    ["Email", sale.purchaserEmail],
+    ["Pass", sale.tierName],
+    ["Quantity", String(sale.quantity)],
+    ["Guests admitted", String(sale.guestCount)],
+    ["Paid", total],
+    ["Order", sale.orderId],
+    ["Payment", sale.paymentIntentId],
+  ];
+  const htmlRows = rows
+    .map(
+      ([label, value]) =>
+        `<tr><td style="padding:8px 12px;color:#8f8b82;font:600 11px Arial,sans-serif;text-transform:uppercase;letter-spacing:.12em;border-bottom:1px solid #28251f">${esc(label)}</td><td style="padding:8px 12px;color:#eceae4;font:400 14px Arial,sans-serif;border-bottom:1px solid #28251f">${esc(value)}</td></tr>`,
+    )
+    .join("");
+  const text = [`New ticket sale — ${sale.eventName}`, "", ...rows.map(([label, value]) => `${label}: ${value}`)].join("\n");
+
+  const res = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      from,
+      to: [to],
+      reply_to: sale.purchaserEmail,
+      subject,
+      html: `<!doctype html><html><body style="margin:0;padding:24px;background:#0a0a09"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#0f100f;border:1px solid #bb9b63"><tr><td style="padding:22px 24px 14px"><div style="color:#bb9b63;font:600 11px Arial,sans-serif;text-transform:uppercase;letter-spacing:.24em">New booking</div><div style="margin-top:8px;color:#eceae4;font:400 30px Georgia,serif">${esc(sale.eventName)}</div><div style="margin-top:6px;color:#d8c196;font:400 17px Georgia,serif">${esc(total)}</div></td></tr><tr><td style="padding:0 12px 16px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0">${htmlRows}</table></td></tr></table></td></tr></table></body></html>`,
+      text,
+    }),
+  });
+  if (!res.ok) throw new Error(`Resend sale notification ${res.status}: ${await res.text()}`);
 }

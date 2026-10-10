@@ -139,7 +139,8 @@ GET TICKETS → /checkout (tier, quantity, guest, card / Apple Pay / Google Pay)
    ```bash
    npx supabase secrets set STRIPE_SECRET_KEY=sk_test_... STRIPE_WEBHOOK_SECRET=whsec_... \
      RESEND_API_KEY=re_... TICKETS_FROM_EMAIL="One More <tickets@theonemorecompany.com>" \
-     SITE_URL=https://theonemorecompany.com DOOR_EMAILS=door@theonemorecompany.com
+     SALES_NOTIFICATION_EMAIL=owner@example.com SITE_URL=https://theonemorecompany.com \
+     DOOR_EMAILS=door@theonemorecompany.com
    ```
 
 Going live later = live keys in step 3 (`sk_live_…` / `pk_live_…`), re-run it, set the live secrets. Types for `Order`, `Ticket`, `TicketTier`, `CheckIn` and `ScanResult` are in
