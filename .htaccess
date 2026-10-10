@@ -1,0 +1,41 @@
+# Hostinger (Apache) config for the static export in /out.
+
+ErrorDocument 404 /404.html
+
+# Pages export as /tickets.html etc.; serve them at /tickets and /tickets/ (query string kept).
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  # Apple Pay checks this file directly. Do not rewrite it to an HTML page.
+  RewriteRule ^\.well-known/ - [L]
+  RewriteCond %{REQUEST_URI} ^/(.+?)/?$
+  RewriteCond %{DOCUMENT_ROOT}/%1.html -f
+  RewriteRule ^(.+?)/?$ /$1.html [L]
+</IfModule>
+
+# Generated share images and app icon are exported without an extension.
+<FilesMatch "^(opengraph-image|twitter-image|apple-icon)$">
+  ForceType image/png
+</FilesMatch>
+<Files "apple-developer-merchantid-domain-association">
+  ForceType application/octet-stream
+</Files>
+
+<IfModule mod_deflate.c>
+  AddOutputFilterByType DEFLATE text/html text/plain text/css application/javascript application/json image/svg+xml
+</IfModule>
+
+<IfModule mod_headers.c>
+  # Hashed build assets never change; everything else revalidates.
+  SetEnvIf Request_URI "^/_next/static/" IMMUTABLE
+  Header set Cache-Control "public, max-age=31536000, immutable" env=IMMUTABLE
+  <FilesMatch "\.(html|txt)$">
+    Header set Cache-Control "public, max-age=0, must-revalidate"
+  </FilesMatch>
+  # Share pages carry a bearer token in the fragment. Do not send a referrer or cache them.
+  <Files "shared.html">
+    Header set Referrer-Policy "no-referrer"
+    Header set Cache-Control "private, no-store"
+  </Files>
+  # Security headers are set in next.config.mjs. Do not add them here.
+  # Hostinger's Node server is the production origin, and it does not apply this file.
+</IfModule>
