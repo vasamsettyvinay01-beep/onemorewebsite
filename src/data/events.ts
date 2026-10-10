@@ -140,7 +140,7 @@ export const events: OneMoreEvent[] = [
       },
       {
         id: "general",
-        name: "General Admission",
+        name: "Male",
         priceCents: 1999,
         currency: "USD",
       },
