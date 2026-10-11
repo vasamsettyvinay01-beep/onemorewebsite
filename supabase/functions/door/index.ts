@@ -119,15 +119,22 @@ Deno.serve(async (req) => {
         const q = typeof body.q === "string" ? body.q.trim().slice(0, 80) : "";
         if (q.length < 2 || !/^[\p{L}\p{N}@.+_ -]+$/u.test(q)) return json(req, { orders: [] });
         const pattern = `%${q}%`;
-        const columns = "id, purchaser_name, purchaser_email, tier_name, status, tickets(id, guest_number, status, checked_in_at, checked_in_by)";
-        const [byName, byEmail] = await Promise.all([
+        const columns = "id, purchaser_name, purchaser_email, tier_name, status, tickets(id, guest_number, guest_name, status, checked_in_at, checked_in_by)";
+        const [byName, byEmail, byGuest] = await Promise.all([
           admin.from("orders").select(columns).eq("event_id", eventId).ilike("purchaser_name", pattern).order("created_at", { ascending: false }).limit(20),
           admin.from("orders").select(columns).eq("event_id", eventId).ilike("purchaser_email", pattern).order("created_at", { ascending: false }).limit(20),
+          admin.from("tickets").select("order_id").eq("event_id", eventId).ilike("guest_name", pattern).limit(20),
         ]);
         if (byName.error) throw byName.error;
         if (byEmail.error) throw byEmail.error;
+        if (byGuest.error) throw byGuest.error;
+        const guestOrderIds = [...new Set((byGuest.data ?? []).map((row) => row.order_id))];
+        const byGuestName = guestOrderIds.length
+          ? await admin.from("orders").select(columns).in("id", guestOrderIds)
+          : { data: [], error: null };
+        if (byGuestName.error) throw byGuestName.error;
         const merged = new Map<string, (typeof byName.data)[number]>();
-        for (const order of [...(byName.data ?? []), ...(byEmail.data ?? [])]) merged.set(order.id, order);
+        for (const order of [...(byName.data ?? []), ...(byEmail.data ?? []), ...(byGuestName.data ?? [])]) merged.set(order.id, order);
         const orders = [...merged.values()];
         for (const order of orders) order.tickets.sort((a, b) => a.guest_number - b.guest_number);
         return json(req, { orders });

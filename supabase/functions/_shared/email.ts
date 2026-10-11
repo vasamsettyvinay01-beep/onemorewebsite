@@ -1,6 +1,6 @@
 import QRCode from "npm:qrcode@1.5.4";
 import { SITE_URL } from "./http.ts";
-import { renderPassEmail, type PassEmail } from "./pass-email.ts";
+import { renderGuestPassEmail, renderPassEmail, type GuestPassEmail, type PassEmail } from "./pass-email.ts";
 
 /** `omc_partners` metadata → marks for the foot of the pass. Logo paths are storage keys. */
 export function readPartners(raw: string | undefined): PassEmail["partners"] {
@@ -94,6 +94,34 @@ export async function sendTicketEmail(t: TicketEmail): Promise<void> {
         content: pngs[i].split(",")[1],
         content_id: `pass-${ticket.guest_number}`,
       })),
+    }),
+  });
+  if (!res.ok) throw new Error(`Resend ${res.status}: ${await res.text()}`);
+}
+
+/** One finished pass, emailed to the friend the buyer named. The buyer keeps every pass. */
+export async function sendGuestPassEmail(input: Omit<GuestPassEmail, "sealUrl" | "qrSrc"> & { to: string; token: string }): Promise<void> {
+  const apiKey = Deno.env.get("RESEND_API_KEY");
+  const from = Deno.env.get("TICKETS_FROM_EMAIL");
+  if (!apiKey || !from) throw new Error("RESEND_API_KEY / TICKETS_FROM_EMAIL not set");
+
+  const png = await qrPng(input.token);
+  const { subject, html, text } = renderGuestPassEmail({
+    ...input,
+    sealUrl: `${BRAND_ASSETS}/seal.png`,
+    qrSrc: "cid:guest-pass",
+  });
+  const res = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      from,
+      to: [input.to],
+      reply_to: Deno.env.get("TICKETS_REPLY_TO") ?? "contact@theonemorecompany.com",
+      subject,
+      html,
+      text,
+      attachments: [{ filename: "pass.png", content: png.split(",")[1], content_id: "guest-pass" }],
     }),
   });
   if (!res.ok) throw new Error(`Resend ${res.status}: ${await res.text()}`);

@@ -543,7 +543,9 @@ function Verdict({ result, onDismiss }: { result: ScanResult | { outcome: "error
           </span>
         </span>
       )}
-      {r?.purchaser_name && <span className="mt-1 text-base opacity-90">{r.purchaser_name}</span>}
+      {(r?.guest_name || r?.purchaser_name) && (
+        <span className="mt-1 text-base opacity-90">{r.guest_name || r.purchaser_name}</span>
+      )}
       {r?.outcome === "already-used" && (
         <span className="mt-5 text-lg font-semibold">
           Scanned at {time}
@@ -629,7 +631,7 @@ function Guests({ eventId, onAdmitted }: { eventId: string; onAdmitted: () => vo
             <ul className="mt-3 flex flex-col gap-2">
               {o.tickets.map((t) => (
                 <li key={t.id} className="flex items-center justify-between gap-3 text-sm">
-                  <span>Guest {t.guest_number}</span>
+                  <span>{t.guest_name ?? `Guest ${t.guest_number}`}</span>
                   {t.status === "valid" ? (
                     <button
                       type="button"

@@ -31,11 +31,18 @@ ErrorDocument 404 /404.html
   <FilesMatch "\.(html|txt)$">
     Header set Cache-Control "public, max-age=0, must-revalidate"
   </FilesMatch>
+
+  # Production security policy for the static Hostinger deployment.
+  Header always set Strict-Transport-Security "max-age=31536000"
+  Header always set X-Content-Type-Options "nosniff"
+  Header always set X-Frame-Options "DENY"
+  Header always set Referrer-Policy "strict-origin-when-cross-origin"
+  Header always set Permissions-Policy "camera=(self), microphone=(), geolocation=(), payment=*"
+  Header always set Content-Security-Policy "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self' 'unsafe-inline' https://js.stripe.com https://*.js.stripe.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://api.stripe.com https://fonts.googleapis.com https://curprrfrkefegefqiign.supabase.co wss://curprrfrkefegefqiign.supabase.co; frame-src https://js.stripe.com https://*.js.stripe.com https://hooks.stripe.com; worker-src 'self' blob:; upgrade-insecure-requests"
+
   # Share pages carry a bearer token in the fragment. Do not send a referrer or cache them.
   <Files "shared.html">
-    Header set Referrer-Policy "no-referrer"
-    Header set Cache-Control "private, no-store"
+    Header always set Referrer-Policy "no-referrer"
+    Header always set Cache-Control "private, no-store"
   </Files>
-  # Security headers are set in next.config.mjs. Do not add them here.
-  # Hostinger's Node server is the production origin, and it does not apply this file.
 </IfModule>

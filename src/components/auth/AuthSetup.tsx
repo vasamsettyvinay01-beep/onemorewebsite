@@ -145,7 +145,13 @@ export function AuthSetup() {
             />
           </>
         )}
-        {qr && <img src={qr} alt="Authenticator setup QR" className="mt-6 size-48 bg-white p-2" />}
+        {qr && (
+          <>
+            {/* Generated data URL; image optimization cannot improve or cache this private QR. */}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={qr} alt="Authenticator setup QR" className="mt-6 size-48 bg-white p-2" />
+          </>
+        )}
         {qr && (
           <label className="mt-4 block text-sm text-zinc-300" htmlFor="staff-mfa-code">
             6-digit code

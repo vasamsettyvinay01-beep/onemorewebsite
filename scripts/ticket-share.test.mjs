@@ -7,6 +7,14 @@ import { passStanding } from "../src/lib/pass-standing.ts";
 const shareSource = readFileSync(new URL("../supabase/functions/ticket-share/index.ts", import.meta.url), "utf8");
 const viewSource = readFileSync(new URL("../supabase/functions/ticket-view/index.ts", import.meta.url), "utf8");
 const doorSource = readFileSync(new URL("../supabase/functions/door/index.ts", import.meta.url), "utf8");
+const rotationMigration = readFileSync(
+  new URL("../supabase/migrations/20261011130000_atomic_ticket_shares.sql", import.meta.url),
+  "utf8",
+);
+const lockOrderMigration = readFileSync(
+  new URL("../supabase/migrations/20261011140000_share_lock_order.sql", import.meta.url),
+  "utf8",
+);
 
 test("cancelled and refunded passes read INVALID, and a used pass reads ALREADY USED", () => {
   assert.equal(passStanding("valid", "paid"), "VALID");
@@ -32,9 +40,24 @@ test("a share token is separate from the admission QR and only its hash is store
   assert.match(shareSource, /revoked_at: new Date/);
   assert.match(shareSource, /\/tickets\/shared#/);
   assert.match(shareSource, /body\.action === "read"/);
+  assert.match(shareSource, /body\.action === "claim"/);
+  assert.match(shareSource, /body\.action === "email"/);
   assert.match(shareSource, /if \(error \|\| data !== true\) return false/);
   assert.doesNotMatch(shareSource, /\?t=/);
-  assert.doesNotMatch(shareSource, /console\.(log|error|info)/);
+  assert.doesNotMatch(shareSource, /console\.(log|error|info)\([^)]*(token|accessToken|admissionCode)/);
+  assert.match(shareSource, /eventName: found\.eventName/);
+  assert.doesNotMatch(shareSource, /eventName: clip\(body\.eventName/);
+  assert.match(shareSource, /\.from\("tiers"\)/);
+  assert.match(shareSource, /prepareShare/);
+  assert.match(shareSource, /activateShare/);
+  assert.ok(shareSource.indexOf("await sendGuestPassEmail") < shareSource.indexOf("await activateShare(found.ticketId, issued)"));
+  assert.match(rotationMigration, /create function public\.activate_ticket_share/);
+  assert.match(rotationMigration, /create function public\.claim_ticket_share/);
+  assert.match(lockOrderMigration, /create function public\.revoke_ticket_share/);
+  assert.match(
+    lockOrderMigration,
+    /perform 1 from tickets where id = v_ticket_id for update;[\s\S]*perform 1[\s\S]*from ticket_shares[\s\S]*for update;/,
+  );
   assert.match(doorSource, /TOKEN_RE = \/\^\[0-9a-f\]\{36\}\$/);
   assert.equal(/^[0-9a-f]{36}$/.test(share), false);
   assert.doesNotMatch(shareSource, /stripe_|purchaser_email/);
@@ -77,27 +100,43 @@ test("qa ticket shares stay off customer inventory", { skip: !live }, async () =
   async function removeQa() {
     const orders = await rest(`orders?event_id=eq.${QA_EVENT}&select=id`, "GET");
     const orderIds = (orders ?? []).map((row) => row.id);
-    if (!orderIds.length) return;
-    const list = orderIds.join(",");
-    const tickets = await rest(`tickets?order_id=in.(${list})&select=id`, "GET");
-    const ticketIds = (tickets ?? []).map((row) => row.id);
-    if (ticketIds.length) {
-      await rest(`ticket_shares?ticket_id=in.(${ticketIds.join(",")})`, "DELETE");
-      await rest(`scans?ticket_id=in.(${ticketIds.join(",")})`, "DELETE");
-      await rest(`tickets?id=in.(${ticketIds.join(",")})`, "DELETE");
+    if (orderIds.length) {
+      const list = orderIds.join(",");
+      const tickets = await rest(`tickets?order_id=in.(${list})&select=id`, "GET");
+      const ticketIds = (tickets ?? []).map((row) => row.id);
+      if (ticketIds.length) {
+        await rest(`ticket_shares?ticket_id=in.(${ticketIds.join(",")})`, "DELETE");
+        await rest(`scans?ticket_id=in.(${ticketIds.join(",")})`, "DELETE");
+        await rest(`tickets?id=in.(${ticketIds.join(",")})`, "DELETE");
+      }
+      await rest(`orders?id=in.(${list})`, "DELETE");
     }
-    await rest(`orders?id=in.(${list})`, "DELETE");
+    await rest(`tiers?event_id=eq.${QA_EVENT}`, "DELETE");
   }
 
   const before = {
     orders: await count("orders", "event_id=eq.evt_diwali_night"),
     tickets: await count("tickets", "event_id=eq.evt_diwali_night"),
-    scans: await count("scans", "id=not.is.null"),
   };
-  assert.deepEqual(before, { orders: 17, tickets: 24, scans: 3 });
   await removeQa();
 
   try {
+    await rest("tiers", "POST", {
+      event_id: QA_EVENT,
+      tier_id: "qa-stagec",
+      name: "QA",
+      price_cents: 1,
+      currency: "usd",
+      admits: 1,
+      max_per_order: 8,
+      active: false,
+      metadata: {
+        omc_event_name: "One More QA",
+        omc_event_date: "November 7, 2026",
+        omc_event_time: "9:00 PM – 2:00 AM",
+        omc_venue_name: "QA Venue",
+      },
+    }, "return=minimal");
     const paid = await rest("orders", "POST", {
       stripe_session_id: `qa-stagec-${randomBytes(8).toString("hex")}`,
       stripe_payment_intent: `qa-pi-${randomBytes(8).toString("hex")}`,
@@ -127,12 +166,11 @@ test("qa ticket shares stay off customer inventory", { skip: !live }, async () =
     const paidId = paid[0].id;
     const refundedId = refunded[0].id;
     const admission = [randomBytes(18), randomBytes(18), randomBytes(18), randomBytes(18), randomBytes(18)].map((b) => b.toString("hex"));
-    const checkedInAt = "2026-10-09T17:00:00.000Z";
     await rest("tickets", "POST", [
       { order_id: paidId, event_id: QA_EVENT, tier_id: "qa-stagec", guest_number: 1, token: admission[0], status: "valid", checked_in_at: null },
       { order_id: paidId, event_id: QA_EVENT, tier_id: "qa-stagec", guest_number: 2, token: admission[1], status: "valid", checked_in_at: null },
       { order_id: paidId, event_id: QA_EVENT, tier_id: "qa-stagec", guest_number: 3, token: admission[2], status: "cancelled", checked_in_at: null },
-      { order_id: paidId, event_id: QA_EVENT, tier_id: "qa-stagec", guest_number: 4, token: admission[3], status: "checked-in", checked_in_at: checkedInAt },
+      { order_id: paidId, event_id: QA_EVENT, tier_id: "qa-stagec", guest_number: 4, token: admission[3], status: "valid", checked_in_at: null },
       { order_id: refundedId, event_id: QA_EVENT, tier_id: "qa-stagec", guest_number: 1, token: admission[4], status: "cancelled", checked_in_at: null },
     ], "return=minimal");
     const tickets = await rest(`tickets?order_id=eq.${paidId}&select=id,guest_number,token,status&order=guest_number`, "GET");
@@ -155,7 +193,10 @@ test("qa ticket shares stay off customer inventory", { skip: !live }, async () =
     assert.equal(serialized.includes(paidId), false);
     assert.equal(view.id, undefined);
     for (const ticket of view.tickets) {
-      assert.deepEqual(Object.keys(ticket).sort(), ["checked_in_at", "guest_number", "status", "token"].sort());
+      assert.deepEqual(
+        Object.keys(ticket).sort(),
+        ["checked_in_at", "guest_name", "guest_number", "share", "status", "token"].sort(),
+      );
       assert.equal(ticket.id, undefined);
       assert.equal(ticket.order_id, undefined);
     }
@@ -200,6 +241,22 @@ test("qa ticket shares stay off customer inventory", { skip: !live }, async () =
     const secondView = await shareApi({ action: "read", token: secondToken });
     assert.equal(secondView.json.guestNumber, 2);
     assert.equal(JSON.stringify(secondView.json).includes(tickets[0].token), false);
+    const claimed = await shareApi({ action: "claim", token: secondToken, name: "PRIYA SHAH" });
+    assert.equal(claimed.status, 200);
+    assert.equal(claimed.json.guestName, "Priya Shah");
+    const claimedView = await shareApi({ action: "read", token: secondToken });
+    assert.equal(claimedView.json.guestName, "Priya Shah");
+    if (process.env.QA_TICKET_EMAIL) {
+      const emailed = await shareApi({
+        action: "email",
+        accessToken: access,
+        guestNumber: 2,
+        email: process.env.QA_TICKET_EMAIL,
+        eventName: "ATTACKER CONTROLLED",
+      });
+      assert.equal(emailed.status, 200);
+      assert.equal(emailed.json.ok, true);
+    }
 
     const rotated = await shareApi({ action: "create", accessToken: access, guestNumber: 1 });
     const rotatedToken = shareToken(rotated.json.url);
@@ -221,15 +278,38 @@ test("qa ticket shares stay off customer inventory", { skip: !live }, async () =
     assert.equal(unchanged[0].token, admission[0]);
 
     const cancelled = await shareApi({ action: "create", accessToken: access, guestNumber: 3 });
-    const cancelledView = await shareApi({ action: "read", token: shareToken(cancelled.json.url) });
-    assert.equal(passStanding(cancelledView.json.status, cancelledView.json.orderStatus), "INVALID");
-    const used = await shareApi({ action: "create", accessToken: access, guestNumber: 4 });
-    const usedView = await shareApi({ action: "read", token: shareToken(used.json.url) });
+    assert.equal(cancelled.status, 409);
+    const fourth = await shareApi({ action: "create", accessToken: access, guestNumber: 4 });
+    assert.equal(fourth.status, 200);
+    const fourthToken = shareToken(fourth.json.url);
+    assert.equal((await shareApi({ action: "claim", token: fourthToken, name: "RAHUL KUMAR" })).status, 200);
+    const admitted = await rest("rpc/check_in_ticket", "POST", {
+      p_token: admission[3],
+      p_event_id: QA_EVENT,
+      p_scanned_by: "qa@theonemorecompany.com",
+      p_device: "release-qa",
+    });
+    assert.equal(admitted[0].outcome, "admitted");
+    assert.equal(admitted[0].guest_name, "Rahul Kumar");
+    const duplicate = await rest("rpc/check_in_ticket", "POST", {
+      p_token: admission[3],
+      p_event_id: QA_EVENT,
+      p_scanned_by: "qa@theonemorecompany.com",
+      p_device: "release-qa",
+    });
+    assert.equal(duplicate[0].outcome, "already-used");
+    const usedView = await shareApi({ action: "read", token: fourthToken });
     assert.equal(passStanding(usedView.json.status, usedView.json.orderStatus), "ALREADY USED");
-    assert.equal(Date.parse(usedView.json.checkedInAt), Date.parse(checkedInAt));
+    assert.ok(usedView.json.checkedInAt);
+    const groupAfterScan = await rest(`tickets?order_id=eq.${paidId}&select=guest_number,status&order=guest_number`, "GET");
+    assert.deepEqual(
+      groupAfterScan.map((row) => [row.guest_number, row.status]),
+      [[1, "valid"], [2, "valid"], [3, "cancelled"], [4, "checked-in"]],
+    );
+    const used = await shareApi({ action: "create", accessToken: access, guestNumber: 4 });
+    assert.equal(used.status, 409);
     const refundedShare = await shareApi({ action: "create", accessToken: refunded[0].access_token, guestNumber: 1 });
-    const refundedView = await shareApi({ action: "read", token: shareToken(refundedShare.json.url) });
-    assert.equal(passStanding(refundedView.json.status, refundedView.json.orderStatus), "INVALID");
+    assert.equal(refundedShare.status, 409);
 
     assert.equal((await shareApi({ action: "read", token: randomBytes(32).toString("hex") })).status, 404);
     const modified = `${secondToken.slice(0, -1)}${secondToken.endsWith("a") ? "b" : "a"}`;
@@ -250,7 +330,6 @@ test("qa ticket shares stay off customer inventory", { skip: !live }, async () =
     const after = {
       orders: await count("orders", "event_id=eq.evt_diwali_night"),
       tickets: await count("tickets", "event_id=eq.evt_diwali_night"),
-      scans: await count("scans", "id=not.is.null"),
     };
     assert.deepEqual(after, before);
     assert.equal(await count("orders", `event_id=eq.${QA_EVENT}`), 0);

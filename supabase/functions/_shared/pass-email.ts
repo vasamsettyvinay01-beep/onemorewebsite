@@ -218,3 +218,68 @@ export function renderPassEmail(input: PassEmail): { subject: string; html: stri
     : `Your passes — ${d.eventName}, ${d.dateLabel}`;
   return { subject, html, text };
 }
+
+export interface GuestPassEmail {
+  senderName: string;
+  eventName: string;
+  dateLabel: string;
+  timeLabel: string;
+  venueName: string;
+  tierName: string;
+  guestNumber: number;
+  total: number;
+  reference: string;
+  passUrl: string;
+  sealUrl: string;
+  qrSrc: string;
+}
+
+/** One pass, sent by the buyer to one friend. No price, no other guests, no order link. */
+export function renderGuestPassEmail(input: GuestPassEmail): { subject: string; html: string; text: string } {
+  const when = [input.dateLabel, input.timeLabel].filter(Boolean).join(" · ");
+  const subject = `${input.senderName} sent you a pass — ${input.eventName}`;
+  const html = `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark"><title>${esc(subject)}</title></head>
+<body style="margin:0;padding:0;background:${C.page}">
+<div style="display:none;max-height:0;overflow:hidden;opacity:0">${esc(input.senderName)} sent you a pass to ${esc(input.eventName)}.</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="${C.page}" style="background:${C.page}"><tr><td align="center" style="padding:16px 12px">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="${C.stock}" style="max-width:420px;background:${C.stock};border:1px solid ${C.gold}">
+    <tr><td align="center" style="padding:22px 20px 0">
+      <img src="${input.sealUrl}" width="22" height="22" alt="" style="display:block;width:22px;height:22px;border:0">
+      <div style="margin-top:8px;${caps(8, C.gold, 0.34)}">The One More Company</div>
+      <div style="margin-top:14px;font:italic 400 18px/1.3 ${SERIF};color:#D8C196">${esc(input.senderName)} sent you a pass</div>
+      <div style="margin-top:6px;font:400 28px/1 ${SERIF};color:${C.ivory}">${esc(input.eventName)}</div>
+      ${when ? `<div style="margin-top:8px;font:400 13px/1.4 ${SANS};color:${C.ivory}">${esc(when)}</div>` : ""}
+      ${input.venueName ? `<div style="font:400 13px/1.4 ${SANS};color:${C.muted}">${esc(input.venueName)}</div>` : ""}
+    </td></tr>
+    <tr><td align="center" style="padding:16px 20px 0">
+      <div style="${caps(8, C.gold, 0.22)}">${esc(input.tierName)} · ${pad2(input.guestNumber)} / ${pad2(input.total)}</div>
+      <table role="presentation" cellpadding="0" cellspacing="0" bgcolor="${C.qr}" style="margin-top:10px;background:${C.qr};border:1px solid ${C.gold}"><tr>
+        <td style="padding:10px;background:${C.qr}"><img src="${input.qrSrc}" width="196" height="196" alt="Your pass QR code" style="display:block;width:196px;height:196px;border:0"></td>
+      </tr></table>
+      <div style="margin-top:8px;font:400 12px/1 ${MONO};letter-spacing:0.28em;color:${C.gold}">Nº ${esc(input.reference)}</div>
+    </td></tr>
+    <tr><td align="center" style="padding:18px 20px 8px">
+      <a href="${esc(input.passUrl)}" style="display:inline-block;padding:14px 22px;background:${C.gold};color:${C.stock};text-decoration:none;${caps(11, C.stock, 0.16)}">Open your pass</a>
+    </td></tr>
+    <tr><td align="center" style="padding:4px 24px 22px;font:400 12px/1.5 ${SANS};color:${C.muted}">
+      Put your name on it when you open it. This pass can be checked in once.
+    </td></tr>
+  </table>
+</td></tr></table>
+</body></html>`;
+  const text = [
+    `${input.senderName} sent you a pass to ${input.eventName}.`,
+    when,
+    input.venueName,
+    `${input.tierName} · ${input.guestNumber} of ${input.total} · Nº ${input.reference}`,
+    "",
+    `Open your pass and put your name on it: ${input.passUrl}`,
+    "",
+    "This pass can be checked in once.",
+  ]
+    .filter((line) => line !== "")
+    .join("\n");
+  return { subject, html, text };
+}

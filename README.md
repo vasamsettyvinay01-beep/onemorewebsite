@@ -120,7 +120,7 @@ GET TICKETS → /checkout (tier, quantity, guest, card / Apple Pay / Google Pay)
    npx supabase login
    npx supabase link --project-ref <ref>
    npx supabase db push
-   npx supabase functions deploy checkout stripe-webhook ticket-view door availability --use-api
+   npx supabase functions deploy checkout stripe-webhook ticket-view ticket-share door availability --use-api
    ```
    Put the project URL and publishable key in `src/data/backend.ts`.
    In Authentication → Users, add the door user (`backend.doorEmail`, auto-confirm, strong password),

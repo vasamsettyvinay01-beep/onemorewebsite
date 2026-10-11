@@ -23,5 +23,5 @@ export const refundPolicy = {
   checkbox: "I understand that ticket sales are final and non-refundable unless the event is cancelled.",
   purchaseLine: "By purchasing, you agree to our Terms and Refund Policy.",
   shareWarning:
-    "Sharing this ticket gives the recipient access to this admission. Each ticket can be checked in only once.",
+    "Send each pass to one person. You keep your own copy. Each pass can be checked in only once.",
 } as const;

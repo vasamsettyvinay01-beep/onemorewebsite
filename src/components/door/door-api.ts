@@ -32,6 +32,7 @@ export interface ScanResult {
   guest_count: number | null;
   tier_name: string | null;
   purchaser_name: string | null;
+  guest_name?: string | null;
   checked_in_at: string | null;
   checked_in_by: string | null;
 }
@@ -48,7 +49,7 @@ export interface GuestOrder {
   purchaser_email: string;
   tier_name: string;
   status: string;
-  tickets: { id: string; guest_number: number; status: string; checked_in_at: string | null }[];
+  tickets: { id: string; guest_number: number; guest_name?: string | null; status: string; checked_in_at: string | null }[];
 }
 
 export class DoorAuthError extends Error {}

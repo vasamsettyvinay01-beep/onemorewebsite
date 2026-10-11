@@ -5,6 +5,7 @@ import QRCode from "qrcode";
 import { refundPolicy } from "@/data/refund-policy";
 import { functionUrl } from "@/data/backend";
 import type { OneMoreEvent } from "@/types/event";
+import { Dialog } from "@/components/ui/Dialog";
 
 interface TicketActionsProps {
   accessToken: string;
@@ -15,12 +16,39 @@ interface TicketActionsProps {
   event: OneMoreEvent | undefined;
   when: string;
   venue: string;
+  /** Name the friend put on this pass. The buyer still holds the pass either way. */
+  guestName: string | null;
+  senderName: string;
+  share: "none" | "ready" | "opened";
+  locked: boolean;
+  onChanged: () => void;
 }
 
-export function TicketActions({ accessToken, guestNumber, total, token, tierName, event, when, venue }: TicketActionsProps) {
+const button =
+  "border border-gold/50 px-3 py-2 text-[0.55rem] font-semibold uppercase tracking-[0.16em] text-gold disabled:opacity-50";
+
+export function TicketActions({
+  accessToken,
+  guestNumber,
+  total,
+  token,
+  tierName,
+  event,
+  when,
+  venue,
+  guestName,
+  senderName,
+  share,
+  locked,
+  onChanged,
+}: TicketActionsProps) {
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [email, setEmail] = useState("");
+  const [invite, setInvite] = useState<{ channel: "whatsapp" | "text"; url: string } | null>(null);
   const reference = token.slice(-6).toUpperCase();
+  const eventName = event?.name ?? "One More";
 
   async function save() {
     setBusy(true);
@@ -41,12 +69,13 @@ export function TicketActions({ accessToken, guestNumber, total, token, tierName
       ctx.fillText("THE ONE MORE COMPANY", 64, 100);
       ctx.fillStyle = "#ECEAE4";
       ctx.font = "600 54px serif";
-      ctx.fillText(event?.name ?? "Your pass", 64, 180);
+      ctx.fillText(eventName, 64, 180);
       ctx.font = "24px sans-serif";
       ctx.fillStyle = "rgba(236,234,228,0.75)";
       ctx.fillText(when || "Date to be announced", 64, 230);
       ctx.fillText(venue || "Venue to be announced", 64, 268);
-      ctx.fillText(`${tierName} · ${guestNumber} of ${total}`, 64, 320);
+      const who = guestName ?? (guestNumber === 1 ? senderName : `Guest ${guestNumber}`);
+      ctx.fillText(`${tierName} · ${who} · ${guestNumber} of ${total}`, 64, 320);
       const image = new Image();
       image.src = qr;
       await image.decode();
@@ -72,47 +101,74 @@ export function TicketActions({ accessToken, guestNumber, total, token, tierName
       body: JSON.stringify({ action: "create", accessToken, guestNumber }),
     });
     const body = await res.json().catch(() => null);
-    return res.ok && typeof body?.url === "string" ? body.url : null;
+    if (!res.ok) {
+      setMessage(typeof body?.error === "string" ? body.error : "Could not prepare this pass.");
+      return null;
+    }
+    return typeof body?.url === "string" ? body.url : null;
   }
 
-  async function share() {
+  async function prepare(channel: "whatsapp" | "text") {
     setBusy(true);
     setMessage(null);
     try {
       const url = await createLink();
-      if (!url) {
-        setMessage("Could not create a share link.");
-        return;
-      }
-      const payload = { title: event?.name ?? "One More pass", text: refundPolicy.shareWarning, url };
-      if (navigator.share) {
-        await navigator.share(payload);
-        return;
-      }
-      await navigator.clipboard.writeText(url);
-      setMessage("Share link copied. Each ticket can be checked in only once.");
-    } catch (err) {
-      if ((err as Error).name !== "AbortError") setMessage("Could not share this ticket.");
+      if (!url) return;
+      setInvite({ channel, url });
+      onChanged();
+    } catch {
+      setMessage("Could not prepare this pass.");
     } finally {
       setBusy(false);
     }
   }
 
-  async function copyLink() {
+  async function sendEmail() {
     setBusy(true);
     setMessage(null);
     try {
-      const url = await createLink();
-      if (!url) {
-        setMessage("Could not create a share link.");
+      const res = await fetch(functionUrl("ticket-share"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "email",
+          accessToken,
+          guestNumber,
+          email,
+        }),
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) {
+        setMessage(typeof body?.error === "string" ? body.error : "Could not send the pass.");
         return;
       }
-      await navigator.clipboard.writeText(url);
-      setMessage("Share link copied. A new link replaces any previous one for this ticket.");
+      setMessage(`Pass sent to ${email.trim()}. You still have it here.`);
+      setEmail("");
+      setInvite(null);
+      onChanged();
     } catch {
-      setMessage("Could not copy the share link.");
+      setMessage("Could not send the pass.");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function shareText(url: string) {
+    const payload = {
+      title: eventName,
+      text: `${senderName} sent you a pass to ${eventName}. Open it and put your name on it.`,
+      url,
+    };
+    try {
+      if (navigator.share) {
+        await navigator.share(payload);
+        setMessage("Choose who should receive this pass. You still have it here.");
+        return;
+      }
+      await navigator.clipboard.writeText(`${payload.text} ${url}`);
+      setMessage("Invitation copied. You still have this pass here.");
+    } catch (err) {
+      if ((err as Error).name !== "AbortError") setMessage("Could not open sharing.");
     }
   }
 
@@ -125,33 +181,127 @@ export function TicketActions({ accessToken, guestNumber, total, token, tierName
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "revoke", accessToken, guestNumber }),
       });
-      setMessage(res.ok ? "Shared link revoked. This pass is still valid." : "Could not revoke the link.");
+      const body = await res.json().catch(() => null);
+      if (!res.ok) {
+        setMessage(typeof body?.error === "string" ? body.error : "Could not revoke the invitation.");
+        return;
+      }
+      setInvite(null);
+      setMessage("Invitation revoked. This pass is still yours. A copy already saved can still be scanned once.");
+      onChanged();
+    } catch {
+      setMessage("Could not revoke the invitation. Please try again.");
     } finally {
       setBusy(false);
     }
   }
 
+  const note =
+    guestName && share === "opened"
+      ? `${guestName} has opened this pass`
+      : guestName
+        ? `In the name of ${guestName}`
+        : share === "opened"
+          ? "Opened. Name not added yet."
+          : share === "ready"
+            ? "Invitation ready"
+            : null;
+
+  const whatsApp =
+    invite?.channel === "whatsapp"
+      ? `https://wa.me/?text=${encodeURIComponent(`${senderName} sent you a pass to ${eventName}. Open it and put your name on it. ${invite.url}`)}`
+      : null;
+
   return (
     <div className="shrink-0 pt-2 text-center">
-      <p className="mx-auto max-w-[36ch] text-[0.58rem] leading-snug text-ivory/45">{refundPolicy.shareWarning}</p>
+      {note && <p className="text-[0.58rem] font-semibold uppercase tracking-[0.16em] text-gold">{note}</p>}
+      <p className="mx-auto mt-1 max-w-[38ch] text-[0.58rem] leading-snug text-ivory/45">{refundPolicy.shareWarning}</p>
       <div className="mt-2 flex justify-center gap-2">
-        <button type="button" disabled={busy} onClick={save} className="border border-gold/50 px-3 py-2 text-[0.55rem] font-semibold uppercase tracking-[0.16em] text-gold disabled:opacity-50">
+        <button type="button" disabled={busy} onClick={save} className={button}>
           Save ticket
         </button>
-        <button type="button" disabled={busy} onClick={share} className="border border-gold/50 px-3 py-2 text-[0.55rem] font-semibold uppercase tracking-[0.16em] text-gold disabled:opacity-50">
-          Share ticket
-        </button>
-        <button type="button" disabled={busy} onClick={copyLink} className="border border-gold/50 px-3 py-2 text-[0.55rem] font-semibold uppercase tracking-[0.16em] text-gold disabled:opacity-50">
-          Copy link
-        </button>
-        <button type="button" disabled={busy} onClick={revoke} className="px-2 py-2 text-[0.55rem] uppercase tracking-[0.14em] text-ivory/40">
-          Revoke link
-        </button>
+        {!locked && (
+          <button type="button" disabled={busy} onClick={() => setOpen(true)} className={button}>
+            {share === "none" && !guestName ? "Send this pass" : "Send again"}
+          </button>
+        )}
       </div>
       {message && <p className="mt-1 text-[0.62rem] text-ivory/70">{message}</p>}
       <p className="mt-1 text-[0.58rem] text-ivory/40">
-        <a href="/refunds/" className="underline-offset-2 hover:underline">Refund Policy</a>
+        <a href="/refunds/" className="underline-offset-2 hover:underline">
+          Refund Policy
+        </a>
       </p>
+
+      <Dialog
+        open={open && !locked}
+        onClose={() => setOpen(false)}
+        title={`Send pass ${guestNumber} of ${total}`}
+        hideTitle
+        className="max-w-[26.5rem]"
+      >
+          <div className="px-4 py-4 pb-[max(1rem,env(safe-area-inset-bottom))] text-left">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-[0.62rem] font-semibold uppercase tracking-[0.22em] text-gold">
+                Pass {guestNumber} of {total}
+              </p>
+              <button
+                type="button"
+                data-autofocus
+                onClick={() => setOpen(false)}
+                className="text-[0.62rem] uppercase tracking-[0.16em] text-ivory/50"
+              >
+                Close
+              </button>
+            </div>
+            <p className="mt-2 text-[0.72rem] leading-snug text-ivory/70">
+              You keep this pass. A new invitation replaces the last link and clears the name. A QR already saved can still be scanned once.
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button type="button" disabled={busy} onClick={() => prepare("whatsapp")} className={button}>
+                {share === "none" ? "WhatsApp" : "Replace via WhatsApp"}
+              </button>
+              <button type="button" disabled={busy} onClick={() => prepare("text")} className={button}>
+                {share === "none" ? "Text" : "Replace via text"}
+              </button>
+              {share !== "none" && (
+                <button type="button" disabled={busy} onClick={revoke} className="px-2 py-2 text-[0.55rem] uppercase tracking-[0.14em] text-ivory/40">
+                  Revoke
+                </button>
+              )}
+            </div>
+            {whatsApp && (
+              <a href={whatsApp} target="_blank" rel="noreferrer" className={`mt-3 inline-block ${button}`}>
+                Open WhatsApp
+              </a>
+            )}
+            {invite?.channel === "text" && (
+              <button type="button" onClick={() => shareText(invite.url)} className={`mt-3 ${button}`}>
+                Choose who receives it
+              </button>
+            )}
+            <form
+              className="mt-3 flex gap-2"
+              onSubmit={(e) => {
+                e.preventDefault();
+                void sendEmail();
+              }}
+            >
+              <input
+                type="email"
+                required
+                autoComplete="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="Their email"
+                className="min-w-0 flex-1 border border-ivory/15 bg-transparent px-3 py-2 text-sm text-ivory outline-none placeholder:text-ivory/30 focus:border-gold/60"
+              />
+              <button type="submit" disabled={busy || !email.trim()} className={button}>
+                Email
+              </button>
+            </form>
+          </div>
+      </Dialog>
     </div>
   );
 }

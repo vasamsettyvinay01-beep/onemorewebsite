@@ -23,7 +23,7 @@ Deno.serve(async (req) => {
   let query = admin
     .from("orders")
     .select(
-      "event_id, tier_name, purchaser_name, status, access_token, tickets(guest_number, token, status, checked_in_at)",
+      "event_id, tier_name, purchaser_name, status, access_token, tickets(guest_number, token, status, checked_in_at, guest_name, ticket_shares(opened_at, revoked_at))",
     );
   if (accessToken && /^[0-9a-f]{48}$/.test(accessToken)) query = query.eq("access_token", accessToken);
   else if (sessionId && /^(cs_(test|live)_|pi_)[A-Za-z0-9]{10,200}$/.test(sessionId)) query = query.eq("stripe_session_id", sessionId);
@@ -49,6 +49,14 @@ Deno.serve(async (req) => {
       token: ticket.token,
       status: ticket.status,
       checked_in_at: ticket.checked_in_at,
+      guest_name: ticket.guest_name,
+      share: shareState(ticket.ticket_shares),
     })),
   });
 });
+
+function shareState(shares: { revoked_at: string | null; opened_at: string | null }[] | null): "none" | "ready" | "opened" {
+  const live = (shares ?? []).find((row) => !row.revoked_at);
+  if (!live) return "none";
+  return live.opened_at ? "opened" : "ready";
+}
