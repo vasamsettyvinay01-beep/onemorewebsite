@@ -11,6 +11,7 @@ import { PolicyAck } from "@/components/checkout/PolicyAck";
 import { backend, backendConfigured, functionUrl } from "@/data/backend";
 import { useLiveEvent } from "@/lib/availability";
 import { formatChapter, formatEventTime, formatMoney, getEventBySlug, getVisibleTiers, isOnSale, waitingFor } from "@/lib/events";
+import { useNightOver } from "@/lib/use-night-over";
 import { cn } from "@/lib/cn";
 import type { OneMoreEvent, TicketTier } from "@/types/event";
 
@@ -77,7 +78,8 @@ export function CheckoutView() {
   const params = useSearchParams();
   const staticEvent = getEventBySlug(params.get("event") ?? "") ?? null;
   const event = useLiveEvent(staticEvent, true);
-  const open = !!event && backendConfigured && !!stripePromise && isOnSale(event);
+  const over = useNightOver(event);
+  const open = !!event && backendConfigured && !!stripePromise && isOnSale(event) && over !== true;
 
   const date = event ? longDate(event) : undefined;
   const when = [date?.replace(/, \d{4}$/, ""), event ? formatEventTime(event) : undefined].filter(Boolean).join(" · ");
@@ -124,7 +126,7 @@ export function CheckoutView() {
               </Elements>
             </div>
           ) : (
-            <Closed event={event} />
+            <Closed event={event} ended={over === true} />
           )}
         </div>
       </div>
@@ -542,11 +544,13 @@ function SoldOutCard() {
   );
 }
 
-function Closed({ event }: { event: OneMoreEvent | null }) {
+function Closed({ event, ended }: { event: OneMoreEvent | null; ended: boolean }) {
   return (
     <div className="flex flex-1 flex-col items-center justify-center pb-24 text-center">
       <p className="font-display text-[clamp(2.2rem,8vw,3.2rem)] leading-none text-ivory">
-        {event ? (
+        {ended && event ? (
+          event.name
+        ) : event ? (
           <>
             {event.name} <span className="italic text-gold">— soon.</span>
           </>
@@ -555,7 +559,7 @@ function Closed({ event }: { event: OneMoreEvent | null }) {
         )}
       </p>
       <p className="mt-5 max-w-[34ch] text-sm leading-relaxed text-ivory/55">
-        {event ? "Passes aren't on sale yet. Check back shortly." : "This checkout link isn't valid."}
+        {ended ? "This night has ended." : event ? "Passes aren't on sale yet. Check back shortly." : "This checkout link isn't valid."}
       </p>
       <Link
         href="/"

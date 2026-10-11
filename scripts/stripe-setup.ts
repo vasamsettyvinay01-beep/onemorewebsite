@@ -15,6 +15,7 @@
  * Safe to re-run after any change to tiers in src/data/events.ts.
  */
 import { events } from "../src/data/events.ts";
+import { eventEndsAt } from "../src/lib/event-end.ts";
 
 const key = process.env.STRIPE_SECRET_KEY;
 const ref = process.env.SUPABASE_PROJECT_REF;
@@ -96,6 +97,7 @@ const eventMeta = {
   omc_chapter: event.chapter !== undefined ? String(event.chapter).padStart(2, "0") : "",
   omc_event_date: dateLabel,
   omc_event_time: event.startTime ? `${clock(event.startTime)}${event.endTime ? ` – ${clock(event.endTime)}` : ""}` : "",
+  omc_event_ends_at: eventEndsAt(event)?.toISOString() ?? "",
   omc_venue_name: event.venue?.name ?? event.city ?? "",
   omc_venue_address: event.venue?.address ?? event.city ?? "",
   omc_map_url: event.venue?.mapUrl ?? "",

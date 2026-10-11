@@ -4,6 +4,7 @@ import { AnimatePresence, motion } from "motion/react";
 import type { OneMoreEvent } from "@/types/event";
 import { formatEventDate } from "@/lib/events";
 import { ease } from "@/lib/motion";
+import { useNightOver } from "@/lib/use-night-over";
 import { useCommunity } from "@/components/community/CommunityProvider";
 import { useIntro } from "@/components/intro/IntroProvider";
 import { useTicketSheet } from "./TicketSheetProvider";
@@ -20,6 +21,7 @@ export function FloatingTicketTab({ event }: FloatingTicketTabProps) {
   const { ready } = useIntro();
   const { open: communityOpen } = useCommunity();
   const { open: ticketOpen, openFor } = useTicketSheet();
+  const over = useNightOver(event);
   const date = formatEventDate(event);
   const city = event.city ?? event.venue?.city;
   const available = event.status !== "cancelled" && event.status !== "past";
@@ -32,7 +34,7 @@ export function FloatingTicketTab({ event }: FloatingTicketTabProps) {
       ? "Before they're sold out."
       : "Before the list closes.";
   const badge = soldOut ? "Closed" : onSale ? "ASAP" : "Soon";
-  const show = ready && available && !communityOpen && !ticketOpen;
+  const show = ready && over === false && available && !communityOpen && !ticketOpen;
 
   return (
     <AnimatePresence>

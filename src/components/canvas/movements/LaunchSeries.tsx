@@ -3,6 +3,7 @@
 import { motion, useInView, useReducedMotion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 import { campaignPieces } from "@/data/campaign";
+import { useInstantPassed } from "@/lib/use-night-over";
 import { anchors } from "@/data/navigation";
 import { cn } from "@/lib/cn";
 import { ease } from "@/lib/motion";
@@ -16,6 +17,10 @@ const GLIMPSE_MS = 3200;
 export interface FeaturedSlot {
   name: string;
   label: string;
+  /** Shown in place of `label` once `endsAt` has passed. */
+  chapterLabel?: string;
+  /** ISO instant when this night is over. */
+  endsAt?: string;
   artwork: Artwork;
 }
 
@@ -34,6 +39,8 @@ export function LaunchSeries({ featured }: { featured: FeaturedSlot | null }) {
   const reduce = useReducedMotion();
   const veiled = campaignPieces.map((p, i) => (p.revealed ? -1 : i)).filter((i) => i >= 0);
   const [glimpse, setGlimpse] = useState(0);
+  const passed = useInstantPassed(featured?.endsAt);
+  const label = passed && featured?.chapterLabel ? featured.chapterLabel : (featured?.label ?? "");
   const nextReveal = veiled[0];
   const glimpsed = veiled[glimpse];
   const offset = featured ? 2 : 1;
@@ -83,7 +90,7 @@ export function LaunchSeries({ featured }: { featured: FeaturedSlot | null }) {
                     <span className="mr-2 text-gold">01</span>
                     {featured.name}
                   </span>
-                  <span className="eyebrow text-[0.55rem] text-gold">{featured.label}</span>
+                  <span className="eyebrow text-[0.55rem] text-gold">{label}</span>
                 </figcaption>
               </figure>
             </a>

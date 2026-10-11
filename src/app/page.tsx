@@ -14,7 +14,8 @@ import { PointerLight } from "@/components/motion/PointerLight";
 import { FloatingTicketTab } from "@/components/ticketing/FloatingTicketTab";
 import { TicketSheetProvider } from "@/components/ticketing/TicketSheetProvider";
 import { anchors } from "@/data/navigation";
-import { getFeaturedEvent } from "@/lib/events";
+import { eventEndsAt } from "@/lib/event-end";
+import { formatChapter, getFeaturedEvent } from "@/lib/events";
 
 /**
  * The One More Company — one continuous cinematic canvas.
@@ -27,7 +28,13 @@ export default function HomePage() {
   const featured = getFeaturedEvent();
   const campaign = featured?.theme ?? null;
   const featuredSlot = featured
-    ? { name: featured.name, label: featured.eyebrow ?? "Next up", artwork: featured.artwork }
+    ? {
+        name: featured.name,
+        label: featured.eyebrow ?? "Next up",
+        chapterLabel: featured.chapter !== undefined ? formatChapter(featured.chapter) : undefined,
+        endsAt: eventEndsAt(featured)?.toISOString(),
+        artwork: featured.artwork,
+      }
     : null;
 
   return (

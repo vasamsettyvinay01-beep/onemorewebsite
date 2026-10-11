@@ -65,6 +65,7 @@ async function handle(req: Request): Promise<Response> {
     return json(req, { error: "Something went wrong. Please try again." }, 500);
   }
   if (!tier) return json(req, { error: "This pass isn't available." }, 404);
+  if (nightHasEnded(tier.metadata)) return json(req, { error: "This night has ended." }, 409);
   if (quantity > tier.max_per_order) return json(req, { error: `Up to ${tier.max_per_order} per booking.` }, 400);
 
   if (tier.opens_after) {
@@ -225,6 +226,14 @@ async function countSold(eventId: string, tierId: string): Promise<number> {
   const { data, error } = await admin.rpc("tier_sold", { p_event_id: eventId, p_tier_id: tierId });
   if (error) throw error;
   return Number(data ?? 0);
+}
+
+function nightHasEnded(metadata: unknown): boolean {
+  if (!metadata || typeof metadata !== "object") return false;
+  const ends = (metadata as Record<string, unknown>).omc_event_ends_at;
+  if (typeof ends !== "string" || !ends) return false;
+  const at = Date.parse(ends);
+  return Number.isFinite(at) && Date.now() >= at;
 }
 
 async function salesClosed(eventId: string): Promise<string | null> {

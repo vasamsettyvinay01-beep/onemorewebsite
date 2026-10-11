@@ -4,6 +4,7 @@ import type { OneMoreEvent } from "@/types/event";
 import { getCheckoutProvider } from "@/lib/checkout";
 import { useLiveEvent } from "@/lib/availability";
 import { isOnSale } from "@/lib/events";
+import { useNightOver } from "@/lib/use-night-over";
 import { eventThemeToStyle } from "@/lib/theme";
 import { Dialog } from "@/components/ui/Dialog";
 import { ComingSoonState } from "./states/ComingSoonState";
@@ -28,16 +29,24 @@ interface TicketSheetProps {
  */
 export function TicketSheet({ open, event: staticEvent, onClose }: TicketSheetProps) {
   const event = useLiveEvent(staticEvent, open);
+  const over = useNightOver(event);
 
   if (!event) return null;
 
   const provider = getCheckoutProvider(event);
-  const live = isOnSale(event) && provider.mode === "live";
+  const live = isOnSale(event) && provider.mode === "live" && over !== true;
   const soldOutKey = event.ticketTiers.filter((t) => t.soldOut).map((t) => t.id).join();
   const themeStyle = eventThemeToStyle(event.theme);
 
   let content: React.ReactNode;
-  if (event.status === "sold-out") {
+  if (over === true) {
+    content = (
+      <div className="flex flex-1 flex-col justify-center px-8">
+        <p className="font-display text-[2.4rem] leading-none text-ivory">{event.name}</p>
+        <p className="mt-4 text-sm text-ivory/55">This night has ended.</p>
+      </div>
+    );
+  } else if (event.status === "sold-out") {
     content = <SoldOutState event={event} onClose={onClose} />;
   } else if (live) {
     content = <CheckoutState key={soldOutKey} event={event} provider={provider} onClose={onClose} />;

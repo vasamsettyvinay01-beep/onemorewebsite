@@ -5,7 +5,9 @@ import { useEffect, useRef } from "react";
 import type { OneMoreEvent } from "@/types/event";
 import { brand } from "@/data/brand";
 import { anchors } from "@/data/navigation";
+import { formatChapter } from "@/lib/events";
 import { ease } from "@/lib/motion";
+import { useNightOver } from "@/lib/use-night-over";
 import { ArtworkFrame } from "@/components/ui/ArtworkFrame";
 import { Button } from "@/components/ui/Button";
 import { Reveal } from "@/components/motion/Reveal";
@@ -30,6 +32,8 @@ export function ExperienceTakeover({ event }: Props) {
   const reduce = useReducedMotion();
   const { takeover } = useCanvas();
   const { openFor } = useTicketSheet();
+  const over = useNightOver(event);
+  const selling = over === false;
 
   const { scrollYProgress } = useScroll({ target: ref, offset: ["start end", "end start"] });
   const strength = useTransform(scrollYProgress, [0.06, 0.28, 0.62, 0.82], [0, 1, 1, 0]);
@@ -41,6 +45,11 @@ export function ExperienceTakeover({ event }: Props) {
 
   const artwork = event.mobileArtwork ?? event.artwork;
   const ctaLabel = event.status === "sold-out" ? "Sold out" : "Get tickets";
+  const eyebrow = over
+    ? event.chapter !== undefined
+      ? formatChapter(event.chapter)
+      : event.name
+    : (event.eyebrow ?? brand.copy.nextUp);
 
   return (
     <div
@@ -77,7 +86,7 @@ export function ExperienceTakeover({ event }: Props) {
         {/* name + essentials */}
         <div className="relative z-10 sm:order-1">
           <Reveal direction="none">
-            <p className="eyebrow text-[0.62rem] text-(--ev-accent)">{event.eyebrow ?? brand.copy.nextUp}</p>
+            <p className="eyebrow text-[0.62rem] text-(--ev-accent)">{eyebrow}</p>
           </Reveal>
 
           <motion.h2
@@ -101,16 +110,18 @@ export function ExperienceTakeover({ event }: Props) {
             <EventFacts event={event} className="border-t border-white/12 pt-5" />
           </Reveal>
 
-          <Reveal delay={0.25} className="mt-9 flex flex-col items-start gap-4 sm:mt-11 xl:flex-row xl:items-center xl:gap-8">
-            <Button variant="event-line" size="lg" onClick={() => openFor(event)} aria-haspopup="dialog" arrow>
-              {ctaLabel}
-            </Button>
-            {event.status !== "on-sale" && (
-              <span className="eyebrow text-[0.58rem] text-(--ev-text-muted)">
-                {event.status === "sold-out" ? "Join the list for releases" : "Community gets first access"}
-              </span>
-            )}
-          </Reveal>
+          {selling && (
+            <Reveal delay={0.25} className="mt-9 flex flex-col items-start gap-4 sm:mt-11 xl:flex-row xl:items-center xl:gap-8">
+              <Button variant="event-line" size="lg" onClick={() => openFor(event)} aria-haspopup="dialog" arrow>
+                {ctaLabel}
+              </Button>
+              {event.status !== "on-sale" && (
+                <span className="eyebrow text-[0.58rem] text-(--ev-text-muted)">
+                  {event.status === "sold-out" ? "Join the list for releases" : "Community gets first access"}
+                </span>
+              )}
+            </Reveal>
+          )}
         </div>
       </div>
     </div>
