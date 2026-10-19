@@ -18,7 +18,7 @@ const email = readFileSync(new URL("../supabase/functions/_shared/email.ts", imp
 const orderEmail = readFileSync(new URL("../supabase/functions/_shared/order-email.ts", import.meta.url), "utf8");
 const ticketsView = readFileSync(new URL("../src/components/ticketing/TicketsView.tsx", import.meta.url), "utf8");
 
-test("the public ticket menu has the intended six choices", () => {
+test("the public ticket menu has the intended five choices", () => {
   assert.deepEqual(
     publicTiers.map((tier) => [tier.id, tier.name, tier.admits ?? 1]),
     [
@@ -27,9 +27,9 @@ test("the public ticket menu has the intended six choices", () => {
       ["general", "Male", 1],
       ["couple", "Couple", 2],
       ["group", "Group of 5", 5],
-      ["group-8", "Group of 8", 8],
     ],
   );
+  assert.equal(event.ticketTiers.some((tier) => tier.id === "group-8"), false);
   const vip = event.ticketTiers.find((tier) => tier.id === "vip");
   assert.equal(vip?.name, "VIP Tables");
   assert.equal(vip?.hidden, undefined);
@@ -75,7 +75,7 @@ test("the buyer receives and retains every generated pass", () => {
 });
 
 test("one buyer email renders every pass while a guest email renders only one", () => {
-  const passes = Array.from({ length: 8 }, (_, index) => ({
+  const passes = Array.from({ length: 5 }, (_, index) => ({
     guest_number: index + 1,
     token: String(index + 1).repeat(36).slice(0, 36),
     qrSrc: `cid:pass-${index + 1}`,
@@ -87,13 +87,13 @@ test("one buyer email renders every pass while a guest email renders only one", 
     timeLabel: "9:00 PM – 2:00 AM",
     venueName: "The Nichols Venue",
     venueAddress: "2515 Morse St",
-    tierName: "Group of 8",
+    tierName: "Group of 5",
     sealUrl: "https://example.com/seal.png",
     ticketsUrl: "https://example.com/tickets?o=owner",
     passes,
   });
-  for (let i = 1; i <= 8; i++) assert.match(owner.html, new RegExp(`cid:pass-${i}`));
-  assert.match(owner.text, /8 guests/);
+  for (let i = 1; i <= 5; i++) assert.match(owner.html, new RegExp(`cid:pass-${i}`));
+  assert.match(owner.text, /5 guests/);
 
   const guest = renderGuestPassEmail({
     senderName: "Vinay",
@@ -101,16 +101,16 @@ test("one buyer email renders every pass while a guest email renders only one", 
     dateLabel: "November 7, 2026",
     timeLabel: "9:00 PM – 2:00 AM",
     venueName: "The Nichols Venue",
-    tierName: "Group of 8",
+    tierName: "Group of 5",
     guestNumber: 4,
-    total: 8,
+    total: 5,
     reference: "ABC123",
     passUrl: "https://example.com/tickets/shared#secret",
     sealUrl: "https://example.com/seal.png",
     qrSrc: "cid:guest-pass",
   });
   assert.match(guest.html, /cid:guest-pass/);
-  assert.match(guest.html, /04 \/ 08/);
+  assert.match(guest.html, /04 \/ 05/);
   assert.doesNotMatch(guest.html, /pass-1|pass-2|pass-3/);
 });
 
@@ -124,7 +124,6 @@ test("maximum currently selectable admissions are explicit", () => {
     Male: 10,
     Couple: 20,
     "Group of 5": 50,
-    "Group of 8": 80,
   });
 });
 

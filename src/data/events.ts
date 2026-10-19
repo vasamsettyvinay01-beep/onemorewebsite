@@ -159,13 +159,6 @@ export const events: OneMoreEvent[] = [
         admits: 5,
       },
       {
-        id: "group-8",
-        name: "Group of 8",
-        priceCents: 13999,
-        currency: "USD",
-        admits: 8,
-      },
-      {
         id: "vip",
         name: "VIP Tables",
         priceCents: 0,

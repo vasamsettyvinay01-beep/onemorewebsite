@@ -162,7 +162,7 @@ function ComplimentaryDesk() {
           <label className="text-xs text-white/55">
             Ticket type
             <select className={`${inputClass} mt-1`} value={tierId} onChange={(e) => setTierId(e.target.value)} required>
-              {event.tiers.map((tier) => (
+              {event.tiers.filter((tier) => tier.active).map((tier) => (
                 <option key={tier.id} value={tier.id}>{tier.name}</option>
               ))}
             </select>
