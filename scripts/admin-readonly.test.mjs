@@ -190,3 +190,14 @@ test("the operations UI refunds and assigns staff without the blocked actions", 
   assert.doesNotMatch(clientSource, /Refunds are disabled/);
   assert.doesNotMatch(clientSource, /Staff management is disabled/);
 });
+
+test("refunded test history is removed without touching paid or complimentary orders", () => {
+  const cleanup = readFileSync(new URL("../supabase/migrations/20261019130000_remove_refunded_test_orders.sql", import.meta.url), "utf8");
+  assert.match(cleanup, /status = 'refunded'/);
+  assert.match(cleanup, /not is_complimentary/);
+  assert.match(cleanup, /expected 21 refunded test orders/);
+  assert.match(cleanup, /paid orders changed/);
+  assert.match(cleanup, /complimentary orders changed/);
+  assert.equal((cleanup.match(/'[0-9a-f]{8}'/g) ?? []).length, 21);
+  assert.match(cleanup, /delete from orders where id = any\(v_ids\) and status = 'refunded'/);
+});
