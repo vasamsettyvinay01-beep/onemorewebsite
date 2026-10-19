@@ -10,6 +10,7 @@ if (!event) throw new Error("Diwali Night is missing");
 
 const publicTiers = event.ticketTiers.filter((tier) => !tier.hidden && !tier.priceOnRequest);
 const checkoutSource = readFileSync(new URL("../src/components/checkout/CheckoutView.tsx", import.meta.url), "utf8");
+const ticketSheetSource = readFileSync(new URL("../src/components/ticketing/states/CheckoutState.tsx", import.meta.url), "utf8");
 const checkoutFunction = readFileSync(new URL("../supabase/functions/checkout/index.ts", import.meta.url), "utf8");
 const fulfilment = readFileSync(new URL("../supabase/migrations/20261009000000_inventory_and_fulfilment.sql", import.meta.url), "utf8");
 const webhook = readFileSync(new URL("../supabase/functions/stripe-webhook/index.ts", import.meta.url), "utf8");
@@ -30,8 +31,14 @@ test("the public ticket menu has the intended six choices", () => {
     ],
   );
   const vip = event.ticketTiers.find((tier) => tier.id === "vip");
-  assert.equal(vip?.hidden, true);
+  assert.equal(vip?.name, "VIP Tables");
+  assert.equal(vip?.hidden, undefined);
   assert.equal(vip?.priceOnRequest, true);
+  assert.equal(vip?.inquiryEmail, "contact@theonemorecompany.com");
+  assert.equal(vip?.inquiryWhatsApp, "15185967630");
+  assert.match(ticketSheetSource, /Email us/);
+  assert.match(ticketSheetSource, /WhatsApp us/);
+  assert.match(ticketSheetSource, /wa\.me/);
 });
 
 test("every tier and quantity produces the exact number of individual passes", () => {

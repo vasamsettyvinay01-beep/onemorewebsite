@@ -67,6 +67,9 @@ export interface TicketTier {
   currency: string;
   /** Price isn't fixed (e.g. VIP tables) — shown as "On request" and never sold through checkout. */
   priceOnRequest?: boolean;
+  /** Direct enquiry options for request-only tiers. Labels are shown instead of the raw phone number. */
+  inquiryEmail?: string;
+  inquiryWhatsApp?: string;
   /** People admitted by one ticket of this tier (couple = 2, group = 5). Defaults to 1. */
   admits?: number;
   /** Id of a tier that must sell out first; this tier stays hidden until then. */

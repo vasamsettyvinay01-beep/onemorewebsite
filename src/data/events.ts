@@ -123,8 +123,8 @@ export const events: OneMoreEvent[] = [
     // Selling: run `npm run stripe:setup` after any tier change (it syncs prices to the backend),
     // then set status: "on-sale".
     ticketTiers: [
-      // Every public pass is listed and can be bought. Early Bird stays on the
-      // list as sold out once its 10 are gone. VIP is not listed.
+      // Every public pass is listed. Early Bird stays on the list as sold out
+      // once its 10 are gone. VIP Tables is enquiry-only.
       {
         id: "early-bird",
         name: "Early Bird",
@@ -165,7 +165,16 @@ export const events: OneMoreEvent[] = [
         currency: "USD",
         admits: 8,
       },
-      { id: "vip", name: "VIP", priceCents: 0, currency: "USD", priceOnRequest: true, hidden: true },
+      {
+        id: "vip",
+        name: "VIP Tables",
+        priceCents: 0,
+        currency: "USD",
+        priceOnRequest: true,
+        description: "For VIP table availability and reservations, contact our team.",
+        inquiryEmail: "contact@theonemorecompany.com",
+        inquiryWhatsApp: "15185967630",
+      },
     ],
   },
 ];

@@ -17,9 +17,9 @@ export function isOnSale(event: OneMoreEvent): boolean {
   return event.status === "on-sale" && getPurchasableTiers(event).length > 0;
 }
 
-/** Public passes. Hidden tiers, including VIP, stay off the list. */
+/** Public passes. Request-only tiers remain visible but cannot enter checkout. */
 export function getVisibleTiers(event: OneMoreEvent): TicketTier[] {
-  return event.ticketTiers.filter((t) => !t.hidden && !t.priceOnRequest);
+  return event.ticketTiers.filter((t) => !t.hidden);
 }
 
 /** The named pass this tier waits for, while that pass is still on sale. */
@@ -32,7 +32,9 @@ export function waitingFor(event: OneMoreEvent, tier: TicketTier): string | unde
 
 /** Tiers that can be bought right now at a fixed price. */
 export function getPurchasableTiers(event: OneMoreEvent): TicketTier[] {
-  return getVisibleTiers(event).filter((t) => !t.soldOut && !t.unavailable && !waitingFor(event, t));
+  return getVisibleTiers(event).filter(
+    (t) => !t.priceOnRequest && !t.soldOut && !t.unavailable && !waitingFor(event, t),
+  );
 }
 
 export function getStartingTier(event: OneMoreEvent): TicketTier | undefined {

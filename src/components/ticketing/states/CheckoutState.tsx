@@ -16,7 +16,9 @@ interface Props {
 
 /** Tier picker. Quantity, name, email and payment happen on /checkout. */
 export function CheckoutState({ event, provider }: Props) {
-  const tiers = getVisibleTiers(event).filter((t) => !t.priceOnRequest);
+  const visibleTiers = getVisibleTiers(event);
+  const tiers = visibleTiers.filter((t) => !t.priceOnRequest);
+  const inquiryTiers = visibleTiers.filter((t) => t.priceOnRequest);
   const [tier, setTier] = useState<TicketTier>(getStartingTier(event) ?? tiers.find((t) => !t.soldOut) ?? tiers[0]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -106,6 +108,52 @@ export function CheckoutState({ event, provider }: Props) {
             <span className="text-2xl tabular-nums tracking-[0.04em] text-gold-soft">{formatMoney(tier.priceCents, tier.currency)}</span>
           </div>
         )}
+
+        {inquiryTiers.map((requestTier) => {
+          const subject = `${event.name} ${requestTier.name} enquiry`;
+          const message = `Hi, I would like to enquire about ${requestTier.name} for ${event.name}.`;
+          const whatsapp = requestTier.inquiryWhatsApp?.replace(/\D/g, "");
+          return (
+            <section
+              key={requestTier.id}
+              className="mt-5 border border-gold/55 bg-gold/[0.08] px-4 py-4 shadow-[0_0_32px_-18px_rgba(187,155,99,0.85)]"
+              aria-labelledby={`${requestTier.id}-title`}
+            >
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-[0.55rem] font-semibold uppercase tracking-[0.24em] text-gold">On request</p>
+                  <h3 id={`${requestTier.id}-title`} className="mt-1 font-display text-[1.65rem] italic leading-none text-ivory">
+                    {requestTier.name}
+                  </h3>
+                </div>
+                <span className="mt-1 size-2 shrink-0 rotate-45 border border-gold" aria-hidden />
+              </div>
+              <p className="mt-3 max-w-[38ch] text-[0.72rem] leading-relaxed text-ivory/65">
+                {requestTier.description ?? "Contact our team for availability and reservations."}
+              </p>
+              <div className="mt-4 grid grid-cols-2 gap-2">
+                {requestTier.inquiryEmail && (
+                  <a
+                    href={`mailto:${requestTier.inquiryEmail}?subject=${encodeURIComponent(subject)}`}
+                    className="flex h-10 items-center justify-center border border-gold/50 text-[0.58rem] font-semibold uppercase tracking-[0.16em] text-gold transition-colors hover:bg-gold hover:text-rich"
+                  >
+                    Email us
+                  </a>
+                )}
+                {whatsapp && (
+                  <a
+                    href={`https://wa.me/${whatsapp}?text=${encodeURIComponent(message)}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex h-10 items-center justify-center bg-gold text-[0.58rem] font-semibold uppercase tracking-[0.16em] text-rich transition-colors hover:bg-gold-soft"
+                  >
+                    WhatsApp us
+                  </a>
+                )}
+              </div>
+            </section>
+          );
+        })}
       </div>
 
       <div className="relative z-10 shrink-0 bg-[#0c0b0a] px-6 pb-[max(0.25rem,env(safe-area-inset-bottom))] pt-4 sm:px-8">
