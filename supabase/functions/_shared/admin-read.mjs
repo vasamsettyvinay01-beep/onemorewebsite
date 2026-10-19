@@ -11,7 +11,14 @@ export const BLOCKED_ACTIONS = [
   "alerts",
 ];
 
-export const OPEN_MUTATIONS = ["refund_preview", "refund_one", "staff_list", "staff_set"];
+export const OPEN_MUTATIONS = [
+  "refund_preview",
+  "refund_one",
+  "staff_list",
+  "staff_set",
+  "issue_complimentary",
+  "resend_complimentary",
+];
 
 export const READ_ACTIONS = [
   "whoami",
@@ -24,6 +31,7 @@ export const READ_ACTIONS = [
   "checkin",
   "sales",
   "audit",
+  "complimentary_list",
 ];
 
 const PAYMENT_STATES = ["paid", "refunded", "partially-refunded", "disputed"];
@@ -65,6 +73,27 @@ export function parseStaffEmail(value) {
   const email = value.trim().toLowerCase();
   if (email.length > 320 || !/^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/.test(email)) return null;
   return email;
+}
+
+export function parseComplimentaryName(value) {
+  if (typeof value !== "string") return null;
+  const name = value.normalize("NFC").trim().replace(/\s+/g, " ");
+  if (name.length < 2 || name.length > 80 || !/^[\p{L}\p{M} .,'’()-]+$/u.test(name)) return null;
+  return name;
+}
+
+export function parseComplimentaryCount(value) {
+  const count = Number(value);
+  return Number.isInteger(count) && count >= 1 && count <= 50 ? count : null;
+}
+
+export function parseIdempotencyKey(value) {
+  if (typeof value !== "string" || !/^[A-Za-z0-9_-]{16,80}$/.test(value)) return null;
+  return value;
+}
+
+export function complimentaryPhraseOk(value) {
+  return value === "SEND";
 }
 
 export function parseStaffRole(value) {

@@ -4,7 +4,7 @@
 
 import Stripe from "npm:stripe@17";
 import { admin } from "../_shared/http.ts";
-import { readPartners, sendSaleNotification, sendTicketEmail } from "../_shared/email.ts";
+import { sendOrderTicketEmail } from "../_shared/order-email.ts";
 import { quoteTicketTotal } from "../_shared/pricing.ts";
 
 const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY")!, { httpClient: Stripe.createFetchHttpClient() });
@@ -142,7 +142,7 @@ async function fulfil(paymentIntentId: string, sessionId?: string) {
     return;
   }
   if (!row.order_id) return;
-  await emailOrder(row.order_id, paymentIntentId, meta, email);
+  await sendOrderTicketEmail(row.order_id, meta, paymentIntentId);
 }
 
 async function refundAndStop(paymentIntentId: string, reason: string) {
@@ -157,66 +157,4 @@ async function refundAndStop(paymentIntentId: string, reason: string) {
     if (!/already been refunded|charge_already_refunded/i.test(message)) throw err;
   }
   await admin.rpc("cancel_order_by_payment_intent", { p_payment_intent: paymentIntentId, p_full: true });
-}
-
-async function emailOrder(orderId: string, paymentIntentId: string, meta: Stripe.Metadata, email: string) {
-  const { data: order, error: orderErr } = await admin
-    .from("orders")
-    .select("status, access_token, emailed_at, purchaser_name, purchaser_email, tier_name, quantity, amount_total, currency, tickets(guest_number, token, status)")
-    .eq("id", orderId)
-    .single();
-  if (orderErr) throw orderErr;
-  if (order.status === "refunded" || order.status === "disputed" || order.emailed_at) return;
-  const tickets = [...order.tickets]
-    .filter((ticket) => ticket.status !== "cancelled")
-    .sort((a, b) => a.guest_number - b.guest_number);
-  if (tickets.length === 0) return;
-
-  const claim = await admin.from("orders").update({ emailed_at: new Date().toISOString() }).eq("id", orderId).is("emailed_at", null).select("id");
-  if (claim.error) throw claim.error;
-  if (!claim.data?.length) return;
-
-  try {
-    await sendTicketEmail({
-      to: email,
-      name: order.purchaser_name,
-      eventName: meta.omc_event_name ?? "One More",
-      chapter: meta.omc_chapter || undefined,
-      dateLabel: meta.omc_event_date ?? "",
-      timeLabel: meta.omc_event_time ?? "",
-      venueName: meta.omc_venue_name ?? "",
-      venueAddress: meta.omc_venue_address ?? "",
-      mapUrl: meta.omc_map_url || undefined,
-      heroUrl: meta.omc_hero_url || undefined,
-      tierName: order.tier_name,
-      invitation: meta.omc_invitation || undefined,
-      partner: meta.omc_partner || undefined,
-      notice: meta.omc_notice || undefined,
-      partners: readPartners(meta.omc_partners),
-      minimumAge: meta.omc_min_age ? Number(meta.omc_min_age) : undefined,
-      accessToken: order.access_token,
-      tickets,
-    });
-    console.log(JSON.stringify({ msg: "email_sent", orderId, tickets: tickets.length }));
-    try {
-      await sendSaleNotification({
-        orderId,
-        paymentIntentId,
-        eventName: meta.omc_event_name ?? "One More",
-        purchaserName: order.purchaser_name,
-        purchaserEmail: order.purchaser_email ?? email,
-        tierName: order.tier_name,
-        quantity: order.quantity,
-        guestCount: tickets.length,
-        amountTotal: order.amount_total,
-        currency: order.currency,
-      });
-      console.log(JSON.stringify({ msg: "sale_notification_sent", orderId }));
-    } catch (err) {
-      console.error(JSON.stringify({ msg: "sale_notification_failed", orderId, error: (err as Error).message?.slice(0, 240) }));
-    }
-  } catch (err) {
-    await admin.from("orders").update({ emailed_at: null }).eq("id", orderId);
-    throw err;
-  }
 }

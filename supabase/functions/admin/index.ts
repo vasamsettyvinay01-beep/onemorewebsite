@@ -5,6 +5,7 @@
 
 import Stripe from "npm:stripe@17";
 import { admin, corsHeaders, json } from "../_shared/http.ts";
+import { sendOrderTicketEmail } from "../_shared/order-email.ts";
 import {
   canAssignRole,
   permit,
@@ -18,6 +19,7 @@ import {
 import {
   checkInPercent,
   cleanSearch,
+  complimentaryPhraseOk,
   dayKey,
   displayScanResult,
   displayTicketStatus,
@@ -29,8 +31,11 @@ import {
   likePattern,
   orderRefFromId,
   parseCheckinFilter,
+  parseComplimentaryCount,
+  parseComplimentaryName,
   parseDay,
   parseEventId,
+  parseIdempotencyKey,
   parseOrderRef,
   parsePage,
   parsePaymentStatus,
@@ -155,7 +160,13 @@ Deno.serve(async (req) => {
       case "sales":
         return asResult(req, await sales(textEvent(body)));
       case "audit":
-        return asResult(req, await auditPage(body));
+        return asResult(req, await auditPage(actor, body));
+      case "complimentary_list":
+        return asResult(req, await complimentaryList(body));
+      case "issue_complimentary":
+        return asResult(req, await issueComplimentary(actor, body, ip, ua));
+      case "resend_complimentary":
+        return asResult(req, await resendComplimentary(actor, body, ip, ua));
       case "refund_preview":
         return asResult(req, await refundPreview(actor, body));
       case "refund_one":
@@ -253,8 +264,13 @@ async function scanRows<T>(
   const rows: T[] = [];
   for (let from = 0; from < 20000; from += 500) {
     const query = table === "orders"
-      ? admin.from(table).select(columns).eq("event_id", eventId).eq("is_test", false)
-      : admin.from(table).select(`${columns}, orders!inner(is_test)`).eq("event_id", eventId).eq("orders.is_test", false);
+      ? admin.from(table).select(columns).eq("event_id", eventId).eq("is_test", false).eq("is_complimentary", false)
+      : admin
+        .from(table)
+        .select(`${columns}, orders!inner(is_test, is_complimentary)`)
+        .eq("event_id", eventId)
+        .eq("orders.is_test", false)
+        .eq("orders.is_complimentary", false);
     const { data, error } = await query.range(from, from + 499);
     if (error) throw error;
     rows.push(...((data ?? []) as T[]));
@@ -411,6 +427,7 @@ async function overview(eventId: string) {
     .select("id, event_id, tier_id, tier_name, quantity, purchaser_name, purchaser_email, amount_total, currency, status, emailed_at, created_at")
     .eq("event_id", eventId)
     .eq("is_test", false)
+    .eq("is_complimentary", false)
     .order("created_at", { ascending: false })
     .limit(8);
   if (error) throw error;
@@ -523,6 +540,7 @@ async function listOrders(body: Record<string, unknown>) {
       .eq("id", ids[0])
       .eq("event_id", eventId)
       .eq("is_test", false)
+      .eq("is_complimentary", false)
       .maybeSingle();
     if (error) throw error;
     if (!data) return { orders: [], page: 1, pageSize: page.pageSize, total: 0 };
@@ -541,6 +559,7 @@ async function listOrders(body: Record<string, unknown>) {
     .select("id, event_id, tier_id, tier_name, quantity, purchaser_name, purchaser_email, amount_total, currency, status, emailed_at, created_at", { count: "exact" })
     .eq("event_id", eventId)
     .eq("is_test", false)
+    .eq("is_complimentary", false)
     .order("created_at", { ascending: false });
   if (payment) request = request.eq("status", payment);
   if (refund === "refunded") request = request.eq("status", "refunded");
@@ -577,6 +596,7 @@ async function orderDetail(body: Record<string, unknown>) {
     .eq("id", ids[0])
     .eq("event_id", eventId)
     .eq("is_test", false)
+    .eq("is_complimentary", false)
     .maybeSingle();
   if (error) throw error;
   if (!data || data.event_id !== eventId) return { error: "Order not found" };
@@ -618,9 +638,10 @@ async function listTickets(body: Record<string, unknown>) {
 
   let request = admin
     .from("tickets")
-    .select("id, event_id, tier_id, guest_number, status, checked_in_at, order_id, orders!inner(id, tier_name, status, event_id, is_test)", { count: "exact" })
+    .select("id, event_id, tier_id, guest_number, status, checked_in_at, order_id, orders!inner(id, tier_name, status, event_id, is_test, is_complimentary)", { count: "exact" })
     .eq("event_id", eventId)
     .eq("orders.is_test", false)
+    .eq("orders.is_complimentary", false)
     .order("created_at", { ascending: false });
   if (tierId) request = request.eq("tier_id", tierId);
   if (status === "valid") request = request.eq("status", "valid");
@@ -697,10 +718,11 @@ async function ticketDetail(body: Record<string, unknown>) {
   if (ids.length !== 1) return { error: "Ticket not found" };
   const { data, error } = await admin
     .from("tickets")
-    .select("id, event_id, tier_id, guest_number, status, checked_in_at, order_id, orders!inner(id, tier_name, status, event_id, is_test)")
+    .select("id, event_id, tier_id, guest_number, status, checked_in_at, order_id, orders!inner(id, tier_name, status, event_id, is_test, is_complimentary)")
     .eq("id", ids[0])
     .eq("event_id", eventId)
     .eq("orders.is_test", false)
+    .eq("orders.is_complimentary", false)
     .maybeSingle();
   if (error) throw error;
   const row = data as TicketJoin & { event_id: string } | null;
@@ -748,6 +770,7 @@ interface ScanOrder {
   tier_name: string;
   status: string;
   is_test: boolean;
+  is_complimentary: boolean;
 }
 
 async function recentScans(eventId: string) {
@@ -760,7 +783,7 @@ async function recentScans(eventId: string) {
   for (let from = 0; from < 1000; from += 200) {
     const { data, error } = await admin
       .from("scans")
-      .select("id, outcome, created_at, tickets(id, event_id, guest_number, tier_id, orders(tier_name, status, is_test))")
+      .select("id, outcome, created_at, tickets(id, event_id, guest_number, tier_id, orders(tier_name, status, is_test, is_complimentary))")
       .order("created_at", { ascending: false })
       .range(from, from + 199);
     if (error) throw error;
@@ -768,7 +791,11 @@ async function recentScans(eventId: string) {
     if (!data || data.length < 200) break;
   }
   const orderOf = (row: (typeof rows)[number]) => (Array.isArray(row.tickets?.orders) ? row.tickets?.orders[0] : row.tickets?.orders);
-  const matched = rows.filter((row) => (!row.tickets || row.tickets.event_id === eventId) && !orderOf(row)?.is_test);
+  const matched = rows.filter((row) =>
+    (!row.tickets || row.tickets.event_id === eventId)
+    && !orderOf(row)?.is_test
+    && !orderOf(row)?.is_complimentary
+  );
   return matched.map((row) => {
     const order = orderOf(row);
     const sameEvent = row.tickets?.event_id === eventId;
@@ -781,15 +808,22 @@ async function recentScans(eventId: string) {
   });
 }
 
-async function auditPage(body: Record<string, unknown>) {
+async function auditPage(actor: Actor, body: Record<string, unknown>) {
   const page = parsePage(body.page, body.pageSize);
   if (!page) return { error: "Bad filter" };
+  let entries = admin
+    .from("audit_log")
+    .select("created_at, actor_id, actor_role, action, resource_type, resource_id, summary", { count: "exact" })
+    .order("created_at", { ascending: false });
+  if (actor.role !== "super_admin") {
+    entries = entries.not(
+      "action",
+      "in",
+      "(COMPLIMENTARY_PASSES_ISSUED,COMPLIMENTARY_EMAIL_RESENT,COMPLIMENTARY_EMAIL_FAILED)",
+    );
+  }
   const [{ data, error, count }, staff] = await Promise.all([
-    admin
-      .from("audit_log")
-      .select("created_at, actor_id, actor_role, action, resource_type, resource_id, summary", { count: "exact" })
-      .order("created_at", { ascending: false })
-      .range(page.from, page.to),
+    entries.range(page.from, page.to),
     admin.from("staff_roles").select("user_id, email, role"),
   ]);
   if (error) throw error;
@@ -815,8 +849,13 @@ async function idsWithPrefix(table: "orders" | "tickets", eventId: string, prefi
   const matches: string[] = [];
   for (let from = 0; from < 20000; from += 1000) {
     const query = table === "orders"
-      ? admin.from(table).select("id").eq("event_id", eventId).eq("is_test", false)
-      : admin.from(table).select("id, orders!inner(is_test)").eq("event_id", eventId).eq("orders.is_test", false);
+      ? admin.from(table).select("id").eq("event_id", eventId).eq("is_test", false).eq("is_complimentary", false)
+      : admin
+        .from(table)
+        .select("id, orders!inner(is_test, is_complimentary)")
+        .eq("event_id", eventId)
+        .eq("orders.is_test", false)
+        .eq("orders.is_complimentary", false);
     const { data, error } = await query.range(from, from + 999);
     if (error) throw error;
     for (const row of (data ?? []) as { id: string }[]) {
@@ -825,6 +864,184 @@ async function idsWithPrefix(table: "orders" | "tickets", eventId: string, prefi
     if (matches.length > 1 || !data || data.length < 1000) break;
   }
   return matches;
+}
+
+interface ComplimentaryOrder {
+  id: string;
+  event_id: string;
+  tier_id: string;
+  tier_name: string;
+  quantity: number;
+  purchaser_name: string | null;
+  purchaser_email: string;
+  emailed_at: string | null;
+  created_at: string;
+}
+
+async function complimentaryList(body: Record<string, unknown>) {
+  const eventId = textEvent(body);
+  if (!eventId) return { error: "eventId required" };
+  const page = parsePage(body.page, body.pageSize);
+  if (!page) return { error: "Bad filter" };
+
+  const [{ data, error, count }, totalTickets] = await Promise.all([
+    admin
+      .from("orders")
+      .select("id, event_id, tier_id, tier_name, quantity, purchaser_name, purchaser_email, emailed_at, created_at", { count: "exact" })
+      .eq("event_id", eventId)
+      .eq("is_test", false)
+      .eq("is_complimentary", true)
+      .order("created_at", { ascending: false })
+      .range(page.from, page.to),
+    complimentaryTicketTotal(eventId),
+  ]);
+  if (error) throw error;
+  return {
+    entries: ((data ?? []) as ComplimentaryOrder[]).map((order) => ({
+      ref: orderRefFromId(order.id),
+      name: order.purchaser_name,
+      email: order.purchaser_email,
+      tier: order.tier_name,
+      tierId: order.tier_id,
+      tickets: order.quantity,
+      emailStatus: emailLabel(order.emailed_at),
+      createdAt: order.created_at,
+    })),
+    totalTickets,
+    page: page.page,
+    pageSize: page.pageSize,
+    total: count ?? 0,
+  };
+}
+
+async function complimentaryTicketTotal(eventId: string): Promise<number> {
+  let total = 0;
+  for (let from = 0; from < 20000; from += 1000) {
+    const { data, error } = await admin
+      .from("orders")
+      .select("quantity")
+      .eq("event_id", eventId)
+      .eq("is_test", false)
+      .eq("is_complimentary", true)
+      .range(from, from + 999);
+    if (error) throw error;
+    for (const row of data ?? []) total += Number(row.quantity) || 0;
+    if (!data || data.length < 1000) break;
+  }
+  return total;
+}
+
+async function issueComplimentary(actor: Actor, body: Record<string, unknown>, ip: string, ua: string) {
+  const eventId = textEvent(body);
+  const tierId = parseTierId(body.tierId);
+  const name = parseComplimentaryName(body.name);
+  const email = parseStaffEmail(body.email);
+  const ticketCount = parseComplimentaryCount(body.ticketCount);
+  const idempotencyKey = parseIdempotencyKey(body.idempotencyKey);
+  if (!eventId || !tierId || !name || !email || !ticketCount || !idempotencyKey) {
+    return { error: "A valid event, ticket type, name, email, and ticket count are required." };
+  }
+  if (!complimentaryPhraseOk(body.confirm)) return { error: "Type SEND to confirm." };
+
+  const tiers = (await loadTiers()).filter((tier) => tier.event_id === eventId);
+  const tier = tiers.find((item) => item.tier_id === tierId);
+  if (!tier) return { error: "Ticket type not found." };
+
+  const { data, error } = await admin.rpc("issue_complimentary_tickets", {
+    p_event_id: eventId,
+    p_tier_id: tierId,
+    p_name: name,
+    p_email: email,
+    p_ticket_count: ticketCount,
+    p_idempotency_key: idempotencyKey,
+  });
+  if (error) throw error;
+  const row = (Array.isArray(data) ? data[0] : data) as { order_id: string | null; outcome: string } | null;
+  if (row?.outcome === "idempotency_mismatch") return { error: "This send request was already used with different details." };
+  if (!row?.order_id || row.outcome === "rejected") return { error: "Complimentary tickets could not be created." };
+
+  if (row.outcome === "created") {
+    await audit(actor, "COMPLIMENTARY_PASSES_ISSUED", "order", row.order_id, {
+      ref: orderRefFromId(row.order_id),
+      email,
+      tier_id: tierId,
+      ticket_count: ticketCount,
+    }, ip, ua);
+  }
+
+  const delivery = await deliverComplimentary(row.order_id, tier.metadata ?? {});
+  if (delivery.error) {
+    await audit(actor, "COMPLIMENTARY_EMAIL_FAILED", "order", row.order_id, {
+      ref: orderRefFromId(row.order_id),
+      ticket_count: ticketCount,
+    }, ip, ua);
+  }
+  return {
+    ok: !delivery.error,
+    created: row.outcome === "created",
+    ref: orderRefFromId(row.order_id),
+    emailStatus: delivery.error ? "Not sent" : "Sent",
+    message: delivery.error
+      ? "The tickets were created, but the email was not sent. Use Retry email from the history below."
+      : `${ticketCount} complimentary ${ticketCount === 1 ? "ticket was" : "tickets were"} sent to ${email}.`,
+  };
+}
+
+async function resendComplimentary(actor: Actor, body: Record<string, unknown>, ip: string, ua: string) {
+  const eventId = textEvent(body);
+  const prefix = parseOrderRef(body.ref);
+  if (!eventId || !prefix) return { error: "Complimentary order not found." };
+  const order = await loadComplimentaryOrder(eventId, prefix);
+  if (!order) return { error: "Complimentary order not found." };
+  const tier = (await loadTiers()).find((item) => item.event_id === eventId && item.tier_id === order.tier_id);
+  if (!tier) return { error: "Ticket type not found." };
+
+  const delivery = await deliverComplimentary(order.id, tier.metadata ?? {});
+  if (delivery.error) {
+    await audit(actor, "COMPLIMENTARY_EMAIL_FAILED", "order", order.id, {
+      ref: orderRefFromId(order.id),
+      ticket_count: order.quantity,
+    }, ip, ua);
+    return { ok: false, ref: orderRefFromId(order.id), emailStatus: "Not sent", message: "The email could not be sent. Try again." };
+  }
+  await audit(actor, "COMPLIMENTARY_EMAIL_RESENT", "order", order.id, {
+    ref: orderRefFromId(order.id),
+    ticket_count: order.quantity,
+  }, ip, ua);
+  return { ok: true, ref: orderRefFromId(order.id), emailStatus: "Sent", message: `Tickets were sent to ${order.purchaser_email}.` };
+}
+
+async function deliverComplimentary(orderId: string, metadata: Record<string, string>) {
+  try {
+    const result = await sendOrderTicketEmail(orderId, metadata);
+    return { result, error: null };
+  } catch (err) {
+    console.error(JSON.stringify({
+      msg: "complimentary_email_failed",
+      orderId,
+      error: (err as Error).message?.slice(0, 240),
+    }));
+    return { result: null, error: "email_failed" };
+  }
+}
+
+async function loadComplimentaryOrder(eventId: string, prefix: string): Promise<ComplimentaryOrder | null> {
+  const matches: ComplimentaryOrder[] = [];
+  for (let from = 0; from < 20000; from += 1000) {
+    const { data, error } = await admin
+      .from("orders")
+      .select("id, event_id, tier_id, tier_name, quantity, purchaser_name, purchaser_email, emailed_at, created_at")
+      .eq("event_id", eventId)
+      .eq("is_test", false)
+      .eq("is_complimentary", true)
+      .range(from, from + 999);
+    if (error) throw error;
+    for (const row of (data ?? []) as ComplimentaryOrder[]) {
+      if (String(row.id).replace(/-/g, "").startsWith(prefix)) matches.push(row);
+    }
+    if (matches.length > 1 || !data || data.length < 1000) break;
+  }
+  return matches.length === 1 ? matches[0] : null;
 }
 
 interface RefundRow {
@@ -850,6 +1067,7 @@ async function loadRefundOrder(eventId: string, ref: string | null): Promise<Ref
     .eq("id", ids[0])
     .eq("event_id", eventId)
     .eq("is_test", false)
+    .eq("is_complimentary", false)
     .maybeSingle();
   if (error) throw error;
   return (data as RefundRow | null) ?? null;

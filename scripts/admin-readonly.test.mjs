@@ -6,6 +6,7 @@ import {
   BLOCKED_ACTIONS,
   checkInPercent,
   cleanSearch,
+  complimentaryPhraseOk,
   displayScanResult,
   displayTicketStatus,
   isBlockedAction,
@@ -14,6 +15,9 @@ import {
   isReadAction,
   parseStaffEmail,
   parseStaffRole,
+  parseComplimentaryCount,
+  parseComplimentaryName,
+  parseIdempotencyKey,
   refundBlockReason,
   refundPhraseOk,
   likePattern,
@@ -35,8 +39,10 @@ const clientSource = [
   "src/components/admin/OverviewPanel.tsx",
   "src/components/admin/RefundsPanel.tsx",
   "src/components/admin/StaffPanel.tsx",
+  "src/components/admin/ComplimentaryPanel.tsx",
   "src/app/admin/refunds/page.tsx",
   "src/app/admin/staff/page.tsx",
+  "src/app/admin/complimentary/page.tsx",
 ].map((path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8")).join("\n");
 
 test("cancellation stays blocked while refunds and staff are open to the server role", () => {
@@ -45,7 +51,7 @@ test("cancellation stays blocked while refunds and staff are open to the server 
     assert.equal(isReadAction(action), false, action);
     assert.equal(isOpenMutation(action), false, action);
   }
-  for (const action of ["refund_preview", "refund_one", "staff_list", "staff_set"]) {
+  for (const action of ["refund_preview", "refund_one", "staff_list", "staff_set", "issue_complimentary", "resend_complimentary"]) {
     assert.equal(isBlockedAction(action), false, action);
     assert.equal(isOpenMutation(action), true, action);
   }
@@ -55,6 +61,8 @@ test("cancellation stays blocked while refunds and staff are open to the server 
   assert.match(adminSource, /not available/);
   assert.match(adminSource, /case "refund_one"/);
   assert.match(adminSource, /case "staff_set"/);
+  assert.match(adminSource, /case "issue_complimentary"/);
+  assert.match(adminSource, /case "resend_complimentary"/);
   assert.match(adminSource, /stripe\.refunds/);
   assert.match(adminSource, /refundPhraseOk\(body\.confirm\)/);
   assert.doesNotMatch(adminSource, /case "cancel_confirm"/);
@@ -80,6 +88,15 @@ test("a super admin can refund a paid charge and an admin cannot until the event
   assert.equal(parseStaffRole("door_staff"), "door_staff");
   assert.equal(parseStaffRole("super_admin"), null);
   assert.equal(parseStaffRole("remove"), "remove");
+  assert.equal(parseComplimentaryName("  Priya   O’Connor "), "Priya O’Connor");
+  assert.equal(parseComplimentaryName("<script>"), null);
+  assert.equal(parseComplimentaryCount(1), 1);
+  assert.equal(parseComplimentaryCount(50), 50);
+  assert.equal(parseComplimentaryCount(51), null);
+  assert.equal(parseIdempotencyKey("550e8400-e29b-41d4-a716-446655440000"), "550e8400-e29b-41d4-a716-446655440000");
+  assert.equal(parseIdempotencyKey("short"), null);
+  assert.equal(complimentaryPhraseOk("SEND"), true);
+  assert.equal(complimentaryPhraseOk("send"), false);
 });
 
 test("read actions stay on the server role, not a client role", () => {
@@ -151,6 +168,13 @@ test("test orders stay out of every admin read", () => {
   assert.match(adminSource, /!orderOf\(row\)\?\.is_test/);
 });
 
+test("complimentary orders stay out of general admin reporting", () => {
+  assert.match(adminSource, /\.eq\("is_complimentary", false\)/);
+  assert.match(adminSource, /\.eq\("orders\.is_complimentary", false\)/);
+  assert.match(adminSource, /COMPLIMENTARY_PASSES_ISSUED/);
+  assert.match(adminSource, /actor\.role !== "super_admin"/);
+});
+
 test("the operations UI refunds and assigns staff without the blocked actions", () => {
   for (const action of ["cancel_confirm", "pause_sales", "resume_sales", "resend", "alerts"]) {
     assert.equal(clientSource.includes(`"${action}"`), false, action);
@@ -158,6 +182,9 @@ test("the operations UI refunds and assigns staff without the blocked actions", 
   assert.match(clientSource, /"refund_one"/);
   assert.match(clientSource, /"staff_set"/);
   assert.match(clientSource, /"staff_list"/);
+  assert.match(clientSource, /"issue_complimentary"/);
+  assert.match(clientSource, /"complimentary_list"/);
+  assert.match(clientSource, /"resend_complimentary"/);
   assert.doesNotMatch(clientSource, /value="super_admin"/);
   assert.match(clientSource, /Scanner access — verify/);
   assert.doesNotMatch(clientSource, /Refunds are disabled/);

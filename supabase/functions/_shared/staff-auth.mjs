@@ -29,6 +29,9 @@ export const PERMISSIONS = {
   alerts: ["super_admin", "admin"],
   staff_list: ["super_admin"],
   staff_set: ["super_admin"],
+  complimentary_list: ["super_admin"],
+  issue_complimentary: ["super_admin"],
+  resend_complimentary: ["super_admin"],
   scan: ["super_admin", "admin", "door_staff"],
   admit: ["super_admin", "admin", "door_staff"],
   stats: ["super_admin", "admin", "door_staff"],
@@ -121,10 +124,18 @@ const READ_LIMITS = new Set([
   "checkin",
   "sales",
   "audit",
+  "complimentary_list",
 ]);
 
 export function rateLimitFor(action) {
-  if (action === "login_failed" || action === "staff_set" || action === "refund_one" || action === "cancel_confirm") {
+  if (
+    action === "login_failed"
+    || action === "staff_set"
+    || action === "refund_one"
+    || action === "cancel_confirm"
+    || action === "issue_complimentary"
+    || action === "resend_complimentary"
+  ) {
     return { limit: action === "login_failed" ? 8 : 5, windowSeconds: 600 };
   }
   if (READ_LIMITS.has(action)) return { limit: 60, windowSeconds: 600 };

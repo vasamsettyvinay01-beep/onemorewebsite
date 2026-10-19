@@ -32,7 +32,12 @@ test("permission matrix denies door staff and limits admins", () => {
   assert.equal(permit("admin", "audit"), true);
   assert.equal(permit("admin", "staff_list"), false);
   assert.equal(permit("admin", "staff_set"), false);
+  assert.equal(permit("admin", "issue_complimentary"), false);
+  assert.equal(permit("admin", "complimentary_list"), false);
   assert.equal(permit("super_admin", "staff_set"), true);
+  assert.equal(permit("super_admin", "issue_complimentary"), true);
+  assert.equal(permit("super_admin", "resend_complimentary"), true);
+  assert.equal(permit("super_admin", "complimentary_list"), true);
   assert.equal(permit("super_admin", "refund_one"), true);
 });
 

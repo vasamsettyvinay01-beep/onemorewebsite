@@ -14,6 +14,7 @@ const checkoutFunction = readFileSync(new URL("../supabase/functions/checkout/in
 const fulfilment = readFileSync(new URL("../supabase/migrations/20261009000000_inventory_and_fulfilment.sql", import.meta.url), "utf8");
 const webhook = readFileSync(new URL("../supabase/functions/stripe-webhook/index.ts", import.meta.url), "utf8");
 const email = readFileSync(new URL("../supabase/functions/_shared/email.ts", import.meta.url), "utf8");
+const orderEmail = readFileSync(new URL("../supabase/functions/_shared/order-email.ts", import.meta.url), "utf8");
 const ticketsView = readFileSync(new URL("../src/components/ticketing/TicketsView.tsx", import.meta.url), "utf8");
 
 test("the public ticket menu has the intended six choices", () => {
@@ -58,8 +59,8 @@ test("browser and server enforce quantity limits independently", () => {
 test("the buyer receives and retains every generated pass", () => {
   assert.match(email, /t\.tickets\.map\(\(ticket, i\)/);
   assert.match(email, /passes: t\.tickets\.map/);
-  assert.match(webhook, /tickets\.length === 0/);
-  assert.match(webhook, /tickets,/);
+  assert.match(orderEmail, /tickets\.length === 0/);
+  assert.match(orderEmail, /tickets,/);
   assert.match(ticketsView, /order\.tickets\.map/);
   assert.match(ticketsView, /qr\[ticket\.token\]/);
   assert.match(ticketsView, /total <= 10/);
