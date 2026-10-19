@@ -46,7 +46,7 @@ export function TicketActions({
   const [busy, setBusy] = useState(false);
   const [open, setOpen] = useState(false);
   const [email, setEmail] = useState("");
-  const [invite, setInvite] = useState<{ channel: "whatsapp" | "text"; url: string } | null>(null);
+  const [invite, setInvite] = useState<{ url: string } | null>(null);
   const reference = token.slice(-6).toUpperCase();
   const eventName = event?.name ?? "One More";
 
@@ -85,10 +85,31 @@ export function TicketActions({
       ctx.fillStyle = "#BB9B63";
       ctx.font = "28px monospace";
       ctx.fillText(`Nº ${reference}`, 64, 980);
+      const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
+      if (!blob) throw new Error("no_image");
+      const filename = `one-more-pass-${reference}.png`;
+      const file = new File([blob], filename, { type: "image/png" });
+      if (navigator.canShare?.({ files: [file] })) {
+        try {
+          await navigator.share({ files: [file], title: `${eventName} pass` });
+          setMessage("Choose Save Image or Save to Files to keep this pass.");
+          return;
+        } catch (err) {
+          if ((err as Error).name === "AbortError") return;
+        }
+      }
+      const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
-      link.href = canvas.toDataURL("image/png");
-      link.download = `one-more-pass-${reference}.png`;
+      link.href = url;
+      link.download = filename;
+      link.rel = "noopener";
+      document.body.appendChild(link);
       link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setMessage("Pass saved.");
+    } catch {
+      setMessage("Could not save this pass. Take a screenshot of the QR instead.");
     } finally {
       setBusy(false);
     }
@@ -108,18 +129,46 @@ export function TicketActions({
     return typeof body?.url === "string" ? body.url : null;
   }
 
-  async function prepare(channel: "whatsapp" | "text") {
+  async function sendPass() {
     setBusy(true);
     setMessage(null);
     try {
       const url = await createLink();
       if (!url) return;
-      setInvite({ channel, url });
+      setInvite({ url });
       onChanged();
+      if (navigator.share) {
+        try {
+          await navigator.share(invitePayload(url));
+          setMessage("Pass sent. You still have it here.");
+          return;
+        } catch (err) {
+          if ((err as Error).name === "AbortError") return;
+        }
+      }
+      setOpen(true);
     } catch {
       setMessage("Could not prepare this pass.");
     } finally {
       setBusy(false);
+    }
+  }
+
+  function invitePayload(url: string) {
+    return {
+      title: eventName,
+      text: `${senderName} sent you a pass to ${eventName}. Open it and put your name on it.`,
+      url,
+    };
+  }
+
+  async function copyInvite(url: string) {
+    const payload = invitePayload(url);
+    try {
+      await navigator.clipboard.writeText(`${payload.text} ${url}`);
+      setMessage("Invitation copied. You still have this pass here.");
+    } catch {
+      setMessage("Could not copy the invitation.");
     }
   }
 
@@ -150,25 +199,6 @@ export function TicketActions({
       setMessage("Could not send the pass.");
     } finally {
       setBusy(false);
-    }
-  }
-
-  async function shareText(url: string) {
-    const payload = {
-      title: eventName,
-      text: `${senderName} sent you a pass to ${eventName}. Open it and put your name on it.`,
-      url,
-    };
-    try {
-      if (navigator.share) {
-        await navigator.share(payload);
-        setMessage("Choose who should receive this pass. You still have it here.");
-        return;
-      }
-      await navigator.clipboard.writeText(`${payload.text} ${url}`);
-      setMessage("Invitation copied. You still have this pass here.");
-    } catch (err) {
-      if ((err as Error).name !== "AbortError") setMessage("Could not open sharing.");
     }
   }
 
@@ -207,10 +237,9 @@ export function TicketActions({
             ? "Invitation ready"
             : null;
 
-  const whatsApp =
-    invite?.channel === "whatsapp"
-      ? `https://wa.me/?text=${encodeURIComponent(`${senderName} sent you a pass to ${eventName}. Open it and put your name on it. ${invite.url}`)}`
-      : null;
+  const whatsApp = invite
+    ? `https://wa.me/?text=${encodeURIComponent(`${invitePayload(invite.url).text} ${invite.url}`)}`
+    : null;
 
   return (
     <div className="shrink-0 pt-2 text-center">
@@ -221,11 +250,16 @@ export function TicketActions({
           Save ticket
         </button>
         {!locked && (
-          <button type="button" disabled={busy} onClick={() => setOpen(true)} className={button}>
+          <button type="button" disabled={busy} onClick={() => void sendPass()} className={button}>
             {share === "none" && !guestName ? "Send this pass" : "Send again"}
           </button>
         )}
       </div>
+      {!locked && share !== "none" && (
+        <button type="button" disabled={busy} onClick={revoke} className="mt-1 text-[0.55rem] uppercase tracking-[0.14em] text-ivory/40">
+          Revoke invitation
+        </button>
+      )}
       {message && <p className="mt-1 text-[0.62rem] text-ivory/70">{message}</p>}
       <p className="mt-1 text-[0.58rem] text-ivory/40">
         <a href="/refunds/" className="underline-offset-2 hover:underline">
@@ -257,28 +291,22 @@ export function TicketActions({
             <p className="mt-2 text-[0.72rem] leading-snug text-ivory/70">
               You keep this pass. A new invitation replaces the last link and clears the name. A QR already saved can still be scanned once.
             </p>
-            <div className="mt-3 flex flex-wrap gap-2">
-              <button type="button" disabled={busy} onClick={() => prepare("whatsapp")} className={button}>
-                {share === "none" ? "WhatsApp" : "Replace via WhatsApp"}
-              </button>
-              <button type="button" disabled={busy} onClick={() => prepare("text")} className={button}>
-                {share === "none" ? "Text" : "Replace via text"}
-              </button>
-              {share !== "none" && (
-                <button type="button" disabled={busy} onClick={revoke} className="px-2 py-2 text-[0.55rem] uppercase tracking-[0.14em] text-ivory/40">
-                  Revoke
+            {invite && (
+              <div className="mt-3 flex flex-wrap gap-2">
+                {navigator.share && (
+                  <button type="button" onClick={() => void navigator.share(invitePayload(invite.url)).catch(() => undefined)} className={button}>
+                    Share
+                  </button>
+                )}
+                {whatsApp && (
+                  <a href={whatsApp} target="_blank" rel="noreferrer" className={button}>
+                    WhatsApp
+                  </a>
+                )}
+                <button type="button" onClick={() => void copyInvite(invite.url)} className={button}>
+                  Copy link
                 </button>
-              )}
-            </div>
-            {whatsApp && (
-              <a href={whatsApp} target="_blank" rel="noreferrer" className={`mt-3 inline-block ${button}`}>
-                Open WhatsApp
-              </a>
-            )}
-            {invite?.channel === "text" && (
-              <button type="button" onClick={() => shareText(invite.url)} className={`mt-3 ${button}`}>
-                Choose who receives it
-              </button>
+              </div>
             )}
             <form
               className="mt-3 flex gap-2"
