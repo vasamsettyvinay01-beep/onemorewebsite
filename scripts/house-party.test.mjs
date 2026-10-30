@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { peopleLabel, renderHousePartyEmail } from "../supabase/functions/_shared/house-party-pass.mjs";
+import { peopleLabel, renderHousePartyCancellationEmail, renderHousePartyEmail, renderHousePartyOrganizerEmail } from "../supabase/functions/_shared/house-party-pass.mjs";
 
 const migration = readFileSync(new URL("../supabase/migrations/20261030120000_house_party_rsvps.sql", import.meta.url), "utf8");
 const functionSource = readFileSync(new URL("../supabase/functions/house-party/index.ts", import.meta.url), "utf8");
@@ -74,4 +74,53 @@ test("House Party email states the confirmed people and public arrival only", ()
     assert.doesNotMatch(message.html, /Pista House|Dumont|Pumpkin|\$0\.00|OPEN BAR|FREE DRINKS/);
     assert.doesNotMatch(message.html, /\b(apt|unit|suite)\s*#?\s*\d+/i);
   }
+});
+
+test("House Party organizer mail follows a confirmed RSVP and a cancellation", () => {
+  assert.match(functionSource, /case "confirmed"/);
+  assert.match(functionSource, /notifyOrganizer\(result\.rsvp_id\)/);
+  assert.match(functionSource, /house_party_organizer_email_failed/);
+  assert.match(functionSource, /action === "cancel"/);
+  assert.match(functionSource, /eq\("status", "confirmed"\)/);
+  const deliverPass = functionSource.slice(functionSource.indexOf("async function deliverPass"), functionSource.indexOf("async function passView"));
+  const resendPass = functionSource.slice(functionSource.indexOf("async function resendPass"));
+  assert.doesNotMatch(deliverPass, /sendHousePartyOrganizerEmail/);
+  assert.doesNotMatch(resendPass, /sendHousePartyOrganizerEmail|sendHousePartyCancellationEmail/);
+
+  for (const count of [1, 2, 4]) {
+    const message = renderHousePartyOrganizerEmail({
+      fullName: "Deepak Kumar Kolipaka",
+      partySize: count,
+      guestNames: ["Shireesha Gundala", "Guest Two", "Guest Three"].slice(0, count - 1),
+      email: "guest@example.com",
+      phone: "5550000000",
+      instagram: count === 1 ? "" : "@guest",
+      rsvpTime: "Fri, Oct 30, 2026, 2:00 PM CDT",
+      code: "AB12CD34",
+      confirmedPeople: 7,
+      capacity: 30,
+      spotsRemaining: 23,
+      pageUrl: "https://theonemorecompany.com/house-party",
+    });
+    assert.equal(message.subject, `NEW HOUSE PARTY RSVP — ${peopleLabel(count).toUpperCase()} — Deepak Kumar Kolipaka`);
+    assert.match(message.text, /STATUS: CONFIRMED/);
+    assert.match(message.text, /CONFIRMED PEOPLE: 7 \/ 30/);
+    assert.match(message.text, /SPOTS REMAINING: 23/);
+    assert.match(message.text, /21\+ confirmed/i);
+    assert.doesNotMatch(message.html, /Pista House|Dumont|Pumpkin|\$0\.00/);
+    assert.doesNotMatch(message.html, /\b(apt|unit|suite)\s*#?\s*\d+/i);
+  }
+
+  const cancelled = renderHousePartyCancellationEmail({
+    fullName: "Deepak Kumar Kolipaka",
+    partySize: 2,
+    cancelledAt: "Fri, Oct 30, 2026, 2:10 PM CDT",
+    confirmedPeople: 5,
+    capacity: 30,
+    spotsRemaining: 25,
+  });
+  assert.equal(cancelled.subject, "HOUSE PARTY RSVP CANCELLED — Deepak Kumar Kolipaka");
+  assert.match(cancelled.text, /UPDATED CONFIRMED PEOPLE: 5 \/ 30/);
+  assert.match(cancelled.text, /UPDATED SPOTS REMAINING: 25/);
+  assert.doesNotMatch(cancelled.text, /NEW HOUSE PARTY RSVP/);
 });

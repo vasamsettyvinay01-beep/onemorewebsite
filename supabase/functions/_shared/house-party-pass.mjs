@@ -122,3 +122,61 @@ export function renderHousePartyEmail(input) {
 
   return { subject, html, text };
 }
+
+function partyCount(count) {
+  const size = Number(count) || 0;
+  return `${size} ${size === 1 ? "PERSON" : "PEOPLE"}`;
+}
+
+function organizerShell(title, rows, extra) {
+  const body = rows
+    .map(([label, value]) => `<tr><td style="padding:8px 0;color:#c6a15b;font-size:11px;letter-spacing:.12em;vertical-align:top;width:42%;">${esc(label)}</td><td style="padding:8px 0;color:#f6f1e8;font-size:14px;">${esc(value)}</td></tr>`)
+    .join("");
+  return `<!doctype html><html><body style="margin:0;background:#0f0f10;color:#f6f1e8;font-family:Helvetica,Arial,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#0f0f10;padding:28px 16px;"><tr><td align="center">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;border:1px solid #c6a15b;background:#141011;">
+      <tr><td style="padding:28px 24px 8px;">
+        <p style="margin:0;letter-spacing:.16em;font-size:11px;color:#c6a15b;">THE ONE MORE COMPANY</p>
+        <h1 style="margin:14px 0 0;font-size:28px;line-height:1;letter-spacing:-.03em;text-transform:uppercase;">${title}</h1>
+        <p style="margin:12px 0 0;letter-spacing:.12em;font-size:12px;">DIWALI × HALLOWEEN HOUSE PARTY</p>
+      </td></tr>
+      <tr><td style="padding:8px 24px 24px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0">${body}</table>${extra || ""}</td></tr>
+    </table>
+  </td></tr></table></body></html>`;
+}
+
+export function renderHousePartyOrganizerEmail(input) {
+  const guests = (input.guestNames ?? []).map((name) => String(name).trim()).filter(Boolean);
+  const count = partyCount(input.partySize);
+  const subject = `NEW HOUSE PARTY RSVP — ${count} — ${input.fullName}`;
+  const rows = [
+    ["STATUS", "CONFIRMED"],
+    ["PRIMARY GUEST", input.fullName],
+    ["PARTY SIZE", count],
+    ["ADDITIONAL GUESTS", guests.length ? guests.join(", ") : "None"],
+    ["EMAIL", input.email],
+    ["PHONE", input.phone],
+    ["INSTAGRAM", input.instagram || "Not provided"],
+    ["AGE CONFIRMATION", "21+ confirmed"],
+    ["RSVP TIME", input.rsvpTime],
+    ["CONFIRMATION / PASS ID", input.code || "Pending"],
+    ["CONFIRMED PEOPLE", `${input.confirmedPeople} / ${input.capacity}`],
+    ["SPOTS REMAINING", String(input.spotsRemaining)],
+  ];
+  const text = ["THE ONE MORE COMPANY", "", "NEW HOUSE PARTY RSVP", "", ...rows.map(([label, value]) => `${label}: ${value}`), "", `OPEN HOUSE PARTY PAGE: ${input.pageUrl}`].join("\n");
+  const extra = `<p style="margin:18px 0 0;"><a href="${esc(input.pageUrl)}" style="display:inline-block;background:#c6a15b;color:#0f0f10;text-decoration:none;letter-spacing:.12em;font-size:12px;padding:12px 16px;">OPEN HOUSE PARTY PAGE</a></p>`;
+  return { subject, html: organizerShell("New House Party RSVP 🔥", rows, extra), text };
+}
+
+export function renderHousePartyCancellationEmail(input) {
+  const subject = `HOUSE PARTY RSVP CANCELLED — ${input.fullName}`;
+  const rows = [
+    ["NAME", input.fullName],
+    ["PARTY SIZE", partyCount(input.partySize)],
+    ["CANCELLED AT", input.cancelledAt],
+    ["UPDATED CONFIRMED PEOPLE", `${input.confirmedPeople} / ${input.capacity}`],
+    ["UPDATED SPOTS REMAINING", String(input.spotsRemaining)],
+  ];
+  const text = ["THE ONE MORE COMPANY", "", subject, "", ...rows.map(([label, value]) => `${label}: ${value}`)].join("\n");
+  return { subject, html: organizerShell("House Party RSVP cancelled", rows), text };
+}

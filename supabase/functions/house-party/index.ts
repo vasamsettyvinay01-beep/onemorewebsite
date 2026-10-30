@@ -2,7 +2,7 @@
 // Capacity, expiry, duplicates, and confirmation all remain in Postgres RPCs.
 
 import { admin, corsHeaders, json } from "../_shared/http.ts";
-import { sendHousePartyEmail } from "../_shared/house-party-email.ts";
+import { sendHousePartyCancellationEmail, sendHousePartyEmail, sendHousePartyOrganizerEmail } from "../_shared/house-party-email.ts";
 
 const EVENT_SLUG = "diwali-halloween-house-party-2026";
 
@@ -56,6 +56,7 @@ async function handle(req: Request): Promise<Response> {
   }
 
   if (body.action === "resend") return resendPass(req, body);
+  if (body.action === "cancel") return cancelRsvp(req, body);
   if (body.ageConfirmed !== true) return json(req, { error: "Please confirm that everyone in your RSVP is 21+.", code: "age_required" }, 400);
 
   const partySize = Number(body.partySize);
@@ -80,6 +81,7 @@ async function handle(req: Request): Promise<Response> {
   switch (result.outcome) {
     case "confirmed": {
       const issued = await issuePass(result.rsvp_id);
+      await notifyOrganizer(result.rsvp_id);
       return json(req, {
         status: "confirmed",
         partySize: result.confirmed_party_size,
@@ -188,9 +190,122 @@ async function passView(req: Request, token: string): Promise<Response> {
   });
 }
 
-async function resendPass(req: Request, body: Record<string, unknown>): Promise<Response> {
+async function notifyOrganizer(rsvpId: string | null): Promise<void> {
+  if (!rsvpId) return;
+  try {
+    const { data, error } = await admin
+      .from("house_party_rsvps")
+      .select("full_name, email, phone, instagram, party_size, guest_names, created_at, confirmation_token, status")
+      .eq("id", rsvpId)
+      .maybeSingle();
+    if (error || !data || data.status !== "confirmed") {
+      console.error(JSON.stringify({ msg: "house_party_organizer_email_skipped" }));
+      return;
+    }
+    const capacity = await capacitySnapshot();
+    if (!capacity) {
+      console.error(JSON.stringify({ msg: "house_party_organizer_email_skipped" }));
+      return;
+    }
+    await sendHousePartyOrganizerEmail({
+      fullName: data.full_name,
+      partySize: data.party_size,
+      guestNames: data.guest_names ?? [],
+      email: data.email,
+      phone: data.phone,
+      instagram: data.instagram,
+      rsvpTime: chicagoTime(data.created_at),
+      code: data.confirmation_token ? passCode(data.confirmation_token) : null,
+      confirmedPeople: capacity.confirmed_people,
+      capacity: capacity.capacity,
+      spotsRemaining: capacity.spots_remaining,
+    });
+    console.log(JSON.stringify({ msg: "house_party_organizer_email_sent", partySize: data.party_size, spotsRemaining: capacity.spots_remaining }));
+  } catch (error) {
+    console.error(JSON.stringify({ msg: "house_party_organizer_email_failed", error: (error as Error).message?.slice(0, 120) }));
+  }
+}
+
+async function cancelRsvp(req: Request, body: Record<string, unknown>): Promise<Response> {
+  if (!serviceAuthorized(req)) return json(req, { error: "Not authorised" }, 401);
+  const token = typeof body.token === "string" ? body.token : "";
+  if (!/^[0-9a-f]{48}$/.test(token)) return json(req, { error: "Not found" }, 404);
+  const cancelled = await admin
+    .from("house_party_rsvps")
+    .update({ status: "cancelled" })
+    .eq("confirmation_token", token)
+    .eq("status", "confirmed")
+    .select("full_name, party_size")
+    .maybeSingle();
+  if (cancelled.error) {
+    console.error(JSON.stringify({ msg: "house_party_cancel_failed" }));
+    return json(req, { error: "Something went wrong. Please try again." }, 500);
+  }
+  if (!cancelled.data) return json(req, { error: "Not found" }, 404);
+
+  const capacity = await capacitySnapshot();
+  let emailSent = false;
+  if (capacity) {
+    try {
+      await sendHousePartyCancellationEmail({
+        fullName: cancelled.data.full_name,
+        partySize: cancelled.data.party_size,
+        cancelledAt: chicagoTime(new Date().toISOString()),
+        confirmedPeople: capacity.confirmed_people,
+        capacity: capacity.capacity,
+        spotsRemaining: capacity.spots_remaining,
+      });
+      emailSent = true;
+    } catch (error) {
+      console.error(JSON.stringify({ msg: "house_party_cancel_email_failed", error: (error as Error).message?.slice(0, 120) }));
+    }
+  }
+  return json(req, {
+    status: "cancelled",
+    emailSent,
+    spotsRemaining: capacity?.spots_remaining ?? null,
+  });
+}
+
+async function capacitySnapshot(): Promise<StatusRow | null> {
+  const event = await admin.from("house_party_events").select("id, capacity").eq("slug", EVENT_SLUG).maybeSingle();
+  if (event.error || !event.data) return null;
+  const confirmed = await admin.from("house_party_rsvps").select("party_size").eq("event_id", event.data.id).eq("status", "confirmed");
+  if (confirmed.error) return null;
+  const confirmedPeople = (confirmed.data ?? []).reduce((sum, row) => sum + row.party_size, 0);
+  return {
+    state: confirmedPeople >= event.data.capacity ? "full" : "active",
+    capacity: event.data.capacity,
+    confirmed_people: confirmedPeople,
+    rsvp_groups: confirmed.data?.length ?? 0,
+    spots_remaining: Math.max(event.data.capacity - confirmedPeople, 0),
+  };
+}
+
+function serviceAuthorized(req: Request): boolean {
   const key = Deno.env.get("SERVICE_KEY") ?? Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
-  if (!key || req.headers.get("authorization") !== `Bearer ${key}`) return json(req, { error: "Not authorised" }, 401);
+  const bearer = req.headers.get("authorization") ?? "";
+  if (key.length > 0 && bearer === `Bearer ${key}`) return true;
+  const presented = req.headers.get("apikey") ?? "";
+  const secrets = Deno.env.get("SUPABASE_SECRET_KEYS") ?? "";
+  return presented.startsWith("sb_secret_") && secrets.includes(presented);
+}
+
+function chicagoTime(iso: string): string {
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Chicago",
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZoneName: "short",
+  }).format(new Date(iso));
+}
+
+async function resendPass(req: Request, body: Record<string, unknown>): Promise<Response> {
+  if (!serviceAuthorized(req)) return json(req, { error: "Not authorised" }, 401);
   const token = typeof body.token === "string" ? body.token : "";
   if (!/^[0-9a-f]{48}$/.test(token)) return json(req, { error: "Not found" }, 404);
   const { data, error } = await admin
