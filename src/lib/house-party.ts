@@ -14,6 +14,16 @@ export interface HousePartySuccess {
   status: "confirmed";
   partySize: number;
   spotsRemaining: number;
+  fullName?: string;
+  passToken?: string | null;
+  emailSent?: boolean;
+}
+
+export interface HousePartyPass {
+  fullName: string;
+  partySize: number;
+  guestNames: string[];
+  code: string;
 }
 
 export interface HousePartyFailure {
@@ -53,9 +63,15 @@ export async function submitHousePartyRsvp(input: {
   };
 }
 
+export async function getHousePartyPass(token: string): Promise<HousePartyPass> {
+  const response = await fetch(`${functionUrl("house-party")}?pass=${encodeURIComponent(token)}`, { cache: "no-store" });
+  if (!response.ok) throw new Error("Pass not found.");
+  return response.json() as Promise<HousePartyPass>;
+}
+
 export function spotsLabel(spots: number): string {
   if (spots <= 0) return "HOUSE FULL";
-  if (spots === 1) return "1 SPOT LEFT";
+  if (spots === 1) return "LAST SPOT";
   if (spots <= 5) return `ONLY ${spots} SPOTS LEFT`;
   return `${spots} SPOTS LEFT`;
 }

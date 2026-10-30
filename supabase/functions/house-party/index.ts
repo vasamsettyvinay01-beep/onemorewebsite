@@ -2,6 +2,7 @@
 // Capacity, expiry, duplicates, and confirmation all remain in Postgres RPCs.
 
 import { admin, corsHeaders, json } from "../_shared/http.ts";
+import { sendHousePartyEmail } from "../_shared/house-party-email.ts";
 
 const EVENT_SLUG = "diwali-halloween-house-party-2026";
 
@@ -15,6 +16,7 @@ type StatusRow = {
 
 type ReservationRow = {
   outcome: "confirmed" | "duplicate" | "full" | "insufficient_capacity" | "ended" | "invalid";
+  rsvp_id: string | null;
   confirmed_party_size: number | null;
   remaining_capacity: number | null;
   existing_party_size: number | null;
@@ -31,7 +33,10 @@ Deno.serve(async (req) => {
 
 async function handle(req: Request): Promise<Response> {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders(req) });
-  if (req.method === "GET") return publicStatus(req);
+  if (req.method === "GET") {
+    const pass = new URL(req.url).searchParams.get("pass");
+    return pass ? passView(req, pass) : publicStatus(req);
+  }
   if (req.method !== "POST") return json(req, { error: "Method not allowed" }, 405);
 
   const ip = clientIp(req);
@@ -50,6 +55,7 @@ async function handle(req: Request): Promise<Response> {
     return json(req, { error: "Bad request." }, 400);
   }
 
+  if (body.action === "resend") return resendPass(req, body);
   if (body.ageConfirmed !== true) return json(req, { error: "Please confirm that everyone in your RSVP is 21+.", code: "age_required" }, 400);
 
   const partySize = Number(body.partySize);
@@ -72,12 +78,17 @@ async function handle(req: Request): Promise<Response> {
   if (!result) return json(req, { error: "Something went wrong. Please try again." }, 500);
 
   switch (result.outcome) {
-    case "confirmed":
+    case "confirmed": {
+      const issued = await issuePass(result.rsvp_id);
       return json(req, {
         status: "confirmed",
         partySize: result.confirmed_party_size,
         spotsRemaining: result.remaining_capacity,
+        fullName: issued.fullName,
+        passToken: issued.token,
+        emailSent: issued.emailSent,
       });
+    }
     case "duplicate":
       return json(req, {
         status: "duplicate",
@@ -120,6 +131,93 @@ async function publicStatus(req: Request): Promise<Response> {
     rsvpGroups: status.rsvp_groups,
     spotsRemaining: status.spots_remaining,
   });
+}
+
+async function issuePass(rsvpId: string | null): Promise<{ token: string | null; emailSent: boolean; fullName: string | null }> {
+  if (!rsvpId) return { token: null, emailSent: false, fullName: null };
+  const token = randomToken();
+  const saved = await admin.from("house_party_rsvps").update({ confirmation_token: token }).eq("id", rsvpId).is("confirmation_token", null).select("full_name, email, party_size, guest_names, status").maybeSingle();
+  if (saved.error || !saved.data || saved.data.status !== "confirmed") {
+    console.error(JSON.stringify({ msg: "house_party_pass_failed" }));
+    return { token: null, emailSent: false, fullName: null };
+  }
+  const emailSent = await deliverPass({
+    id: rsvpId,
+    token,
+    fullName: saved.data.full_name,
+    email: saved.data.email,
+    partySize: saved.data.party_size,
+    guestNames: saved.data.guest_names ?? [],
+  });
+  return { token, emailSent, fullName: saved.data.full_name };
+}
+
+async function deliverPass(pass: { id: string; token: string; fullName: string; email: string; partySize: number; guestNames: string[] }): Promise<boolean> {
+  try {
+    await sendHousePartyEmail({
+      to: pass.email,
+      fullName: pass.fullName,
+      partySize: pass.partySize,
+      guestNames: pass.guestNames,
+      code: passCode(pass.token),
+      token: pass.token,
+    });
+    const marked = await admin.from("house_party_rsvps").update({ email_sent_at: new Date().toISOString() }).eq("id", pass.id);
+    if (marked.error) console.error(JSON.stringify({ msg: "house_party_email_mark_failed" }));
+    return true;
+  } catch (error) {
+    console.error(JSON.stringify({ msg: "house_party_email_failed", error: (error as Error).message?.slice(0, 120) }));
+    return false;
+  }
+}
+
+async function passView(req: Request, token: string): Promise<Response> {
+  if (!/^[0-9a-f]{48}$/.test(token)) return json(req, { error: "Not found" }, 404);
+  const { data, error } = await admin
+    .from("house_party_rsvps")
+    .select("full_name, party_size, guest_names, status")
+    .eq("confirmation_token", token)
+    .maybeSingle();
+  if (error) return json(req, { error: "Something went wrong. Please try again." }, 500);
+  if (!data || data.status !== "confirmed") return json(req, { error: "Not found" }, 404);
+  return json(req, {
+    fullName: data.full_name,
+    partySize: data.party_size,
+    guestNames: data.guest_names ?? [],
+    code: passCode(token),
+  });
+}
+
+async function resendPass(req: Request, body: Record<string, unknown>): Promise<Response> {
+  const key = Deno.env.get("SERVICE_KEY") ?? Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+  if (!key || req.headers.get("authorization") !== `Bearer ${key}`) return json(req, { error: "Not authorised" }, 401);
+  const token = typeof body.token === "string" ? body.token : "";
+  if (!/^[0-9a-f]{48}$/.test(token)) return json(req, { error: "Not found" }, 404);
+  const { data, error } = await admin
+    .from("house_party_rsvps")
+    .select("id, full_name, email, party_size, guest_names, status, confirmation_token")
+    .eq("confirmation_token", token)
+    .maybeSingle();
+  if (error || !data || data.status !== "confirmed" || !data.confirmation_token) return json(req, { error: "Not found" }, 404);
+  const emailSent = await deliverPass({
+    id: data.id,
+    token: data.confirmation_token,
+    fullName: data.full_name,
+    email: data.email,
+    partySize: data.party_size,
+    guestNames: data.guest_names ?? [],
+  });
+  return json(req, { emailSent });
+}
+
+function randomToken(): string {
+  const bytes = new Uint8Array(24);
+  crypto.getRandomValues(bytes);
+  return [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function passCode(token: string): string {
+  return token.slice(0, 8).toUpperCase();
 }
 
 function first<T>(value: unknown): T | null {

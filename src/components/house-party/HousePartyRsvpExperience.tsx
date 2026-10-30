@@ -10,6 +10,8 @@ import {
   type HousePartyStatus,
   type HousePartySuccess,
 } from "@/lib/house-party";
+import { housePartyArrival } from "@/lib/house-party-arrival";
+import { HousePartyPassCard } from "./HousePartyPassCard";
 
 type FormState = {
   fullName: string;
@@ -32,7 +34,6 @@ const emptyForm: FormState = {
 };
 
 const ticketHref = "/checkout?event=diwali-night";
-const locationCopy = "We'll send the private location to your RSVP contact details.";
 const partyOptions = [
   { value: 1, label: "1 — Just me" },
   { value: 2, label: "2 — Two people" },
@@ -126,7 +127,7 @@ export function HousePartyRsvpExperience() {
     }
   }
 
-  if (confirmation) return <Confirmation partySize={confirmation.partySize} />;
+  if (confirmation) return <Confirmation result={confirmation} guestNames={form.guestNames} fallbackName={form.fullName} />;
   if (!availability) return <LoadingState failed={loadFailed} />;
   if (availability.state === "ended") return <EndedState />;
   if (availability.state === "full") return <FullState />;
@@ -151,25 +152,20 @@ export function HousePartyRsvpExperience() {
             <p className="mt-6 max-w-xl text-[0.95rem] leading-7 text-[#f6f1e8]/70">
               A private night of music, dancing, games, drinks and good vibes — and your first taste of what ONE MORE is bringing on Nov 7.
             </p>
-            <ul className="mt-7 grid grid-cols-2 gap-x-3 gap-y-3 text-[0.7rem] font-semibold uppercase tracking-[0.13em] text-[#f6f1e8]/78">
-              <li>Music + Dancing</li>
-              <li>Games</li>
-              <li>BYOB</li>
-              <li>Snacks & Sodas on Us</li>
-              <li className="col-span-2 text-[#df8a42]">Desi × Spooky × Glam</li>
+            <ul className="mt-7 grid grid-cols-2 gap-2 text-[0.68rem] font-semibold uppercase tracking-[0.12em] text-[#f6f1e8]/80">
+              {["Free entry", "No cover", "No payment required", "RSVP required", "Only 30 people", "21+ only", "BYOB", "Snacks & sodas on us"].map((item) => (
+                <li key={item} className="border border-[#c6a15b]/30 px-3 py-2">{item}</li>
+              ))}
             </ul>
-            <div className="mt-8 border-l border-[#c6a15b]/60 pl-4 text-[0.7rem] font-semibold uppercase tracking-[0.16em] text-[#f6f1e8]/70">
-              <p>9 PM onwards · 21+ only</p>
-              <p className="mt-2 text-[#c6a15b]">Private location</p>
-              <p className="mt-2 normal-case tracking-normal">{locationCopy}</p>
-            </div>
+            <p className="mt-5 text-sm leading-6 text-[#f6f1e8]/70">Music, games, and good vibes. Bring your own drinks — we are not selling alcohol. Bring a valid 21+ photo ID.</p>
           </section>
 
           <section aria-labelledby="rsvp-heading" className="relative rounded-[4px] border border-[#c6a15b]/50 bg-[#181313]/90 p-5 shadow-[0_28px_80px_-35px_rgba(0,0,0,1),0_0_70px_-32px_rgba(223,93,39,0.9)] backdrop-blur-xl sm:p-7">
             <div aria-hidden className="pointer-events-none absolute -right-16 -top-20 size-52 rounded-full bg-[#9d3b20]/25 blur-3xl" />
             <div className="relative">
-              <p className="eyebrow text-[#df8a42]">Free RSVP</p>
-              <h2 id="rsvp-heading" className="mt-2 font-headline text-3xl text-[#f6f1e8]">Only 30 People</h2>
+              <p className="eyebrow text-[#df8a42]">Free entry</p>
+              <h2 id="rsvp-heading" className="mt-2 font-headline text-3xl text-[#f6f1e8]">Only 30 Spots</h2>
+              <p className="mt-2 text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-[#f6f1e8]/60">No cover · No payment required · RSVP required</p>
               <p className={`mt-3 inline-flex border px-3 py-2 text-[0.68rem] font-semibold uppercase tracking-[0.17em] ${availability.spotsRemaining <= 5 ? "border-[#df8a42] bg-[#7d2018]/40 text-[#f6c28e]" : "border-[#c6a15b]/45 bg-[#c6a15b]/10 text-[#c6a15b]"}`}>
                 {spotsLabel(availability.spotsRemaining)}
               </p>
@@ -213,9 +209,9 @@ export function HousePartyRsvpExperience() {
                   <span>I understand this is a private 21+ event and everyone in my RSVP must be 21+.</span>
                 </label>
                 <button disabled={busy} className="h-12 w-full bg-[#c6a15b] text-[0.7rem] font-semibold uppercase tracking-[0.18em] text-[#0f0f10] shadow-[0_12px_30px_-18px_rgba(198,161,91,0.9)] transition-[background-color,transform,box-shadow] duration-300 hover:-translate-y-px hover:bg-[#e4c98a] hover:shadow-[0_16px_34px_-16px_rgba(228,201,138,0.95)] disabled:translate-y-0 disabled:cursor-wait disabled:opacity-70" type="submit">
-                  {busy ? "Confirming RSVP..." : "Confirm Free RSVP"}
+                  {busy ? "Confirming RSVP..." : "Claim Free RSVP"}
                 </button>
-                <p className="text-center text-[0.58rem] font-semibold uppercase tracking-[0.13em] text-[#f6f1e8]/38">Free entry · No payment required</p>
+                <p className="text-center text-[0.62rem] font-semibold uppercase leading-5 tracking-[0.12em] text-[#f6f1e8]/55">Free entry · Only 30 spots · 21+ only · BYOB · Private location</p>
               </form>
             </div>
           </section>
@@ -259,21 +255,29 @@ function LoadingState({ failed }: { failed: boolean }) {
   );
 }
 
-function Confirmation({ partySize }: { partySize: number }) {
+function Confirmation({ result, guestNames, fallbackName }: { result: HousePartySuccess; guestNames: string[]; fallbackName: string }) {
+  const count = result.partySize;
   return (
-    <main className="grid min-h-dvh place-items-center overflow-hidden bg-[#0f0f10] px-6 py-12 text-center text-[#f6f1e8]">
+    <main className="min-h-dvh overflow-x-clip bg-[#0f0f10] px-4 py-10 text-center text-[#f6f1e8]">
       <Atmosphere />
-      <div className="relative max-w-xl">
-        <p className="eyebrow text-[#df8a42]">Free RSVP confirmed</p>
+      <div className="relative mx-auto max-w-xl">
+        <p className="eyebrow text-[#df8a42]">Free entry</p>
         <h1 className="mt-4 font-headline text-[clamp(3rem,15vw,6rem)]">You&apos;re in. 🔥</h1>
-        <p className="mt-3 font-display text-3xl text-[#c6a15b]">Diwali × Halloween<br />House Party</p>
-        <p className="mt-8 text-[0.68rem] font-semibold uppercase tracking-[0.16em] text-[#f6f1e8]/55">Your RSVP is confirmed for</p>
-        <p className="mt-2 font-headline text-5xl text-[#f6f1e8]">{partySize} {partySize === 1 ? "Person" : "People"}</p>
-        <p className="mt-7 text-sm font-semibold uppercase tracking-[0.15em] text-[#f6f1e8]/75">Tonight · 9 PM onwards</p>
-        <p className="mt-3 text-sm font-semibold uppercase tracking-[0.15em] text-[#f6f1e8]/75">21+ only · BYOB</p>
-        <p className="mx-auto mt-3 max-w-sm text-sm leading-6 text-[#f6f1e8]/65">{locationCopy}</p>
-        <p className="mt-9 font-display text-2xl leading-none text-[#c6a15b]">Tonight is the trailer.<br />November 7 is the main event.</p>
-        <Link href={ticketHref} className="mt-9 inline-flex h-12 items-center bg-[#c6a15b] px-6 text-[0.67rem] font-semibold uppercase tracking-[0.15em] text-[#0f0f10] transition-colors hover:bg-[#e4c98a]">Get Nov 7 Tickets</Link>
+        <p className="mt-3 text-sm font-semibold uppercase tracking-[0.14em]">Your free RSVP is confirmed.</p>
+        <p className="mt-3 font-headline text-5xl">{count} {count === 1 ? "Person" : "People"}</p>
+        <p className="mt-4 text-sm font-semibold uppercase tracking-[0.14em] text-[#f6f1e8]/75">Tonight · 9 PM onwards · 21+ only · BYOB</p>
+        <p className="mx-auto mt-4 max-w-sm text-sm leading-6 text-[#f6f1e8]/70">
+          {result.emailSent === false
+            ? "Your free RSVP is confirmed. The email did not send — contact ONE MORE and we will resend your House Party Pass."
+            : "Check your email for your House Party Pass and arrival instructions."}
+        </p>
+        <div className="mt-8 text-left">
+          <HousePartyPassCard fullName={result.fullName || fallbackName} partySize={count} guestNames={guestNames} code={result.passToken ? result.passToken.slice(0, 8).toUpperCase() : ""} token={result.passToken} />
+        </div>
+        <a href={housePartyArrival.href} target="_blank" rel="noopener noreferrer" className="mt-6 inline-flex h-12 w-full max-w-md items-center justify-center bg-[#c6a15b] text-[0.68rem] font-semibold uppercase tracking-[0.15em] text-[#0f0f10]">Open arrival location</a>
+        <p className="mx-auto mt-4 max-w-sm text-sm leading-6 text-[#f6f1e8]/70">Arrive at the shared location. Contact us when you arrive and we&apos;ll guide you to the house.</p>
+        <p className="mt-8 font-display text-2xl leading-none text-[#c6a15b]">Tonight is the trailer.<br />November 7 is the main event.</p>
+        <Link href={ticketHref} className="mt-6 inline-flex h-12 items-center bg-[#c6a15b] px-6 text-[0.67rem] font-semibold uppercase tracking-[0.15em] text-[#0f0f10]">Get Nov 7 Tickets</Link>
       </div>
     </main>
   );
@@ -286,7 +290,7 @@ function FullState() {
       <div className="relative max-w-lg">
         <p className="eyebrow text-[#df8a42]">Tonight</p>
         <h1 className="mt-4 font-headline text-[clamp(3rem,15vw,5.7rem)]">House Full 🔥</h1>
-        <p className="mt-5 text-sm font-semibold uppercase tracking-[0.15em] text-[#f6f1e8]/70">All 30 spots are claimed.</p>
+        <p className="mt-5 text-sm font-semibold uppercase tracking-[0.15em] text-[#f6f1e8]/70">All 30 free spots are claimed.</p>
         <p className="mt-8 font-display text-3xl text-[#c6a15b]">Tonight is the trailer.<br />November 7 is the main event.</p>
         <Link href={ticketHref} className="mt-9 inline-flex h-12 items-center bg-[#c6a15b] px-6 text-[0.67rem] font-semibold uppercase tracking-[0.15em] text-[#0f0f10] transition-colors hover:bg-[#f6f1e8]">Get Nov 7 Tickets</Link>
       </div>
