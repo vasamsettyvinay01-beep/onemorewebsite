@@ -150,7 +150,7 @@ export function HousePartyRsvpExperience() {
               Tonight is the trailer.<br />November 7 is the main event.
             </p>
             <p className="mt-6 max-w-xl text-[0.95rem] leading-7 text-[#f6f1e8]/70">
-              A private night of music, dancing, games, drinks and good vibes — and your first taste of what ONE MORE is bringing on Nov 7.
+              A private night of music, dancing, games, and good vibes — and your first taste of what ONE MORE is bringing on Nov 7.
             </p>
             <ul className="mt-7 grid grid-cols-2 gap-2 text-[0.68rem] font-semibold uppercase tracking-[0.12em] text-[#f6f1e8]/80">
               {["Free entry", "No cover", "No payment required", "RSVP required", "Only 30 people", "21+ only", "BYOB", "Snacks & sodas on us"].map((item) => (
