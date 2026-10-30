@@ -7,7 +7,7 @@ import { LaunchSeries } from "@/components/canvas/movements/LaunchSeries";
 import { Manifesto } from "@/components/canvas/movements/Manifesto";
 import { CommunityProvider } from "@/components/community/CommunityProvider";
 import { FloatingCommunityPill } from "@/components/community/FloatingCommunityPill";
-import { HousePartyAnnouncement } from "@/components/house-party/HousePartyAnnouncement";
+import { HousePartyPreview } from "@/components/house-party/HousePartyPreview";
 import { Intro } from "@/components/intro/Intro";
 import { IntroProvider } from "@/components/intro/IntroProvider";
 import { Header } from "@/components/layout/Header";
@@ -50,12 +50,12 @@ export default function HomePage() {
             Skip to the next experience
           </a>
           <Header />
-          <HousePartyAnnouncement />
           <PointerLight />
 
           <OneMoreCanvas campaign={campaign}>
             <main>
-              <Arrival />
+              <Arrival event={featured} />
+              <HousePartyPreview />
               <Manifesto />
               <Experience />
               <LaunchSeries featured={featuredSlot} />

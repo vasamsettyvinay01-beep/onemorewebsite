@@ -1,6 +1,7 @@
 "use client";
 
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, motion, useMotionValueEvent, useScroll } from "motion/react";
+import { useState } from "react";
 import type { OneMoreEvent } from "@/types/event";
 import { formatEventDate } from "@/lib/events";
 import { ease } from "@/lib/motion";
@@ -27,6 +28,15 @@ export function FloatingTicketTab({ event }: FloatingTicketTabProps) {
   const available = event.status !== "cancelled" && event.status !== "past";
   const onSale = event.status === "on-sale";
   const soldOut = event.status === "sold-out";
+
+  // The hero already carries its own "Get tickets" CTA. This stays out of the
+  // way until the visitor has scrolled past it, so the first screen isn't
+  // competing between two identical calls to action.
+  const { scrollY } = useScroll();
+  const [pastHero, setPastHero] = useState(false);
+  useMotionValueEvent(scrollY, "change", (v) => {
+    if (!pastHero && typeof window !== "undefined" && v > window.innerHeight * 0.8) setPastHero(true);
+  });
   const action = soldOut ? "View status" : onSale ? "Get tickets" : "Get access";
   const urgency = soldOut
     ? "This one went fast."
@@ -34,7 +44,7 @@ export function FloatingTicketTab({ event }: FloatingTicketTabProps) {
       ? "Before they're sold out."
       : "Before the list closes.";
   const badge = soldOut ? "Closed" : onSale ? "ASAP" : "Soon";
-  const show = ready && over === false && available && !communityOpen && !ticketOpen;
+  const show = ready && pastHero && over === false && available && !communityOpen && !ticketOpen;
 
   return (
     <AnimatePresence>
