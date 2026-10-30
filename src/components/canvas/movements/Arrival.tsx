@@ -26,9 +26,9 @@ export function Arrival() {
   const copyOpacity = useTransform(scrollYProgress, [0, 0.5], [1, 0]);
 
   return (
-    <div id={anchors.arrival} ref={ref} className="relative h-[100svh] min-h-[36rem]">
+    <div id={anchors.arrival} ref={ref} className="relative h-[85svh] min-h-[36rem] sm:h-[100svh]">
       <motion.div
-        className="absolute inset-x-0 top-[34%] flex -translate-y-1/2 flex-col items-center short:top-[29%] sm:top-[36%] lg:top-[45%]"
+        className="absolute inset-x-0 top-[44%] flex -translate-y-1/2 flex-col items-center short:top-[29%] sm:top-[36%] lg:top-[45%]"
         style={{ scale: sealScale, y: sealY, opacity: sealOpacity }}
       >
         <motion.div
@@ -49,7 +49,7 @@ export function Arrival() {
         </motion.p>
       </motion.div>
 
-      <motion.div className="absolute inset-x-0 bottom-[17.75rem] short:bottom-[15.25rem] sm:bottom-[19.5rem] lg:bottom-[8svh]" style={{ opacity: copyOpacity }}>
+      <motion.div className="absolute inset-x-0 bottom-[13rem] short:bottom-[15.25rem] sm:bottom-[19.5rem] lg:bottom-[8svh]" style={{ opacity: copyOpacity }}>
         <div className="page-container flex items-end justify-between gap-8">
           <h1 className="font-headline text-[clamp(2rem,5.6vw,4.25rem)] text-ivory">
             <SplitReveal text={brand.copy.hero[0]} play={ready} delay={0.8} />
