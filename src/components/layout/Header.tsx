@@ -9,7 +9,6 @@ import { ease } from "@/lib/motion";
 import { BrandLogo } from "@/components/ui/BrandLogo";
 import { useCommunity } from "@/components/community/CommunityProvider";
 import { useIntro } from "@/components/intro/IntroProvider";
-import { HousePartyAnnouncement } from "@/components/house-party/HousePartyAnnouncement";
 import { MenuPanel } from "./MenuPanel";
 import { SoundToggle } from "./SoundToggle";
 
@@ -37,7 +36,6 @@ export function Header() {
         transition={{ duration: 1.4, delay: 1.2, ease: ease.cinematic }}
         className="fixed inset-x-0 top-0 z-[70]"
       >
-        <HousePartyAnnouncement />
         <div
           aria-hidden
           className={cn(

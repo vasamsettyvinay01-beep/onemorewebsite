@@ -7,9 +7,6 @@ import { getHousePartyStatus, spotsLabel, type HousePartyStatus } from "@/lib/ho
 /**
  * Kept client-only so the static export contains no expired promotion. The
  * Edge Function uses the database clock as the authoritative expiry source.
- *
- * Rendered inside the fixed header, above the nav row — a thin, single-line
- * live strip. It must never compete with the main hero below it.
  */
 export function HousePartyAnnouncement() {
   const [status, setStatus] = useState<HousePartyStatus | null>(null);
@@ -24,25 +21,27 @@ export function HousePartyAnnouncement() {
 
   if (!status || status.state === "ended") return null;
 
-  const full = status.state === "full";
-
   return (
-    <div className="border-b border-gold/20 bg-[#0b0c0b]/94">
-      <Link
-        href="/house-party"
-        className="group flex items-center justify-center gap-2 px-4 py-2 text-center sm:gap-3 sm:py-2.5"
-      >
-        <span aria-hidden className="relative hidden size-1.5 shrink-0 sm:flex">
-          <span className="absolute inline-flex size-full animate-ping rounded-full bg-gold-soft opacity-70" />
-          <span className="relative size-1.5 rounded-full bg-gold-soft" />
-        </span>
-        <span className="truncate text-[0.58rem] font-semibold uppercase tracking-[0.12em] text-ivory/80 sm:text-[0.64rem] sm:tracking-[0.14em]">
-          Tonight · Free House Party · {full ? "House full" : spotsLabel(status.spotsRemaining)}
-        </span>
-        <span className="shrink-0 rounded-[2px] bg-gold px-2.5 py-1 text-[0.54rem] font-semibold uppercase tracking-[0.12em] text-rich transition-colors group-hover:bg-gold-soft sm:px-3 sm:text-[0.58rem]">
-          {full ? "Details" : "RSVP free"}
-        </span>
-      </Link>
-    </div>
+    <aside className="fixed inset-x-3 top-[5.6rem] z-[60] mx-auto max-w-xl sm:top-24">
+      <div className="relative overflow-hidden rounded-[3px] border border-[#c6a15b]/75 bg-[#14100f]/96 px-4 py-3 shadow-[0_18px_55px_-20px_rgba(0,0,0,0.95),0_0_45px_-18px_rgba(198,109,38,0.85)] backdrop-blur-xl sm:px-5">
+        <div aria-hidden className="pointer-events-none absolute -right-12 -top-20 size-44 rounded-full bg-[#9d3b20]/30 blur-3xl" />
+        <div className="relative flex items-center gap-3">
+          <div className="min-w-0 flex-1">
+            <p className="eyebrow text-[#df8a42]">Tonight</p>
+            <p className="mt-1 font-headline text-[1.05rem] text-ivory sm:text-[1.2rem]">Diwali × Halloween House Party</p>
+            <p className="mt-1 text-[0.62rem] font-semibold uppercase tracking-[0.15em] text-ivory/65">Free entry · Only 30 spots · 21+</p>
+            <p className="mt-1 text-[0.62rem] font-semibold uppercase tracking-[0.15em] text-[#c6a15b]">
+              {status.state === "full" ? "House full" : spotsLabel(status.spotsRemaining)}
+            </p>
+          </div>
+          <Link
+            href="/house-party"
+            className="shrink-0 rounded-[2px] bg-[#c6a15b] px-3 py-3 text-center text-[0.62rem] font-semibold uppercase tracking-[0.15em] text-[#0f0f10] transition-colors hover:bg-[#f6f1e8]"
+          >
+            {status.state === "full" ? "House full" : "RSVP for free"}
+          </Link>
+        </div>
+      </div>
+    </aside>
   );
 }
