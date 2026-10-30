@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import Link from "next/link";
 import {
   getHousePartyStatus,
@@ -32,6 +32,13 @@ const emptyForm: FormState = {
 };
 
 const ticketHref = "/checkout?event=diwali-night";
+const locationCopy = "We'll send the private location to your RSVP contact details.";
+const partyOptions = [
+  { value: 1, label: "1 — Just me" },
+  { value: 2, label: "2 — Two people" },
+  { value: 3, label: "3 — Three people" },
+  { value: 4, label: "4 — Four people" },
+] as const;
 
 export function HousePartyRsvpExperience() {
   const [availability, setAvailability] = useState<HousePartyStatus | null>(null);
@@ -40,6 +47,7 @@ export function HousePartyRsvpExperience() {
   const [notice, setNotice] = useState<HousePartyFailure | null>(null);
   const [confirmation, setConfirmation] = useState<HousePartySuccess | null>(null);
   const [busy, setBusy] = useState(false);
+  const submitting = useRef(false);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -53,6 +61,16 @@ export function HousePartyRsvpExperience() {
   }, []);
 
   const guestIndexes = useMemo(() => Array.from({ length: Math.max(0, form.partySize - 1) }, (_, index) => index), [form.partySize]);
+  const maxPartySize = Math.min(4, Math.max(1, availability?.spotsRemaining ?? 4));
+
+  useEffect(() => {
+    if (!availability || availability.state !== "active" || availability.spotsRemaining < 1) return;
+    const limit = Math.min(4, availability.spotsRemaining);
+    if (form.partySize <= limit) return;
+    changePartySize(limit);
+    // Clamp only when the server reports a smaller remaining count.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [availability]);
 
   function changePartySize(value: number) {
     const partySize = Number.isInteger(value) && value >= 1 && value <= 4 ? value : 1;
@@ -73,10 +91,12 @@ export function HousePartyRsvpExperience() {
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (busy) return;
+    if (submitting.current) return;
+    submitting.current = true;
     setBusy(true);
     setNotice(null);
-    const result = await submitHousePartyRsvp(form);
+    const result = await submitHousePartyRsvp({ ...form, partySize: Math.min(form.partySize, maxPartySize) });
+    submitting.current = false;
     setBusy(false);
 
     if (result.status === "confirmed") {
@@ -112,7 +132,7 @@ export function HousePartyRsvpExperience() {
   if (availability.state === "full") return <FullState />;
 
   return (
-    <main className="relative min-h-dvh overflow-hidden bg-[#0f0f10] pb-12 pt-8 text-[#f6f1e8] sm:pb-16 sm:pt-12">
+    <main className="relative min-h-dvh overflow-x-clip bg-[#0f0f10] pb-12 pt-8 text-[#f6f1e8] sm:pb-16 sm:pt-12">
       <Atmosphere />
       <div className="page-container relative z-10">
         <Link href="/" className="eyebrow text-[#c6a15b] transition-colors hover:text-[#f6f1e8]">
@@ -140,11 +160,12 @@ export function HousePartyRsvpExperience() {
             </ul>
             <div className="mt-8 border-l border-[#c6a15b]/60 pl-4 text-[0.7rem] font-semibold uppercase tracking-[0.16em] text-[#f6f1e8]/70">
               <p>9 PM onwards · 21+ only</p>
-              <p className="mt-2 text-[#c6a15b]">Private location · details shared after confirmation</p>
+              <p className="mt-2 text-[#c6a15b]">Private location</p>
+              <p className="mt-2 normal-case tracking-normal">{locationCopy}</p>
             </div>
           </section>
 
-          <section aria-labelledby="rsvp-heading" className="relative overflow-hidden rounded-[4px] border border-[#c6a15b]/50 bg-[#181313]/90 p-5 shadow-[0_28px_80px_-35px_rgba(0,0,0,1),0_0_70px_-32px_rgba(223,93,39,0.9)] backdrop-blur-xl sm:p-7">
+          <section aria-labelledby="rsvp-heading" className="relative rounded-[4px] border border-[#c6a15b]/50 bg-[#181313]/90 p-5 shadow-[0_28px_80px_-35px_rgba(0,0,0,1),0_0_70px_-32px_rgba(223,93,39,0.9)] backdrop-blur-xl sm:p-7">
             <div aria-hidden className="pointer-events-none absolute -right-16 -top-20 size-52 rounded-full bg-[#9d3b20]/25 blur-3xl" />
             <div className="relative">
               <p className="eyebrow text-[#df8a42]">Free RSVP</p>
@@ -154,7 +175,7 @@ export function HousePartyRsvpExperience() {
               </p>
 
               {notice && <Notice notice={notice} />}
-              <form className="mt-6 space-y-4" onSubmit={submit}>
+              <form className="mt-6 space-y-4 [color-scheme:dark]" onSubmit={submit}>
                 <Field label="Full name" id="full-name">
                   <input id="full-name" required autoComplete="name" value={form.fullName} onChange={(event) => setForm((current) => ({ ...current, fullName: event.target.value }))} className={inputClass} />
                 </Field>
@@ -169,18 +190,19 @@ export function HousePartyRsvpExperience() {
                 <Field label="Instagram (optional)" id="instagram">
                   <input id="instagram" autoComplete="off" value={form.instagram} onChange={(event) => setForm((current) => ({ ...current, instagram: event.target.value }))} className={inputClass} />
                 </Field>
-                <Field label="Number of people" id="party-size" hint="Includes you">
-                  <select id="party-size" value={form.partySize} onChange={(event) => changePartySize(Number(event.target.value))} className={inputClass}>
-                    {[1, 2, 3, 4].map((size) => <option key={size} value={size}>{size}</option>)}
-                  </select>
-                </Field>
+                <div>
+                  <p id="party-size-label" className="mb-1.5 flex justify-between text-[0.62rem] font-semibold uppercase tracking-[0.14em] text-[#f6f1e8]/58">
+                    Number of people <span className="text-[#f6f1e8]/35">Includes you</span>
+                  </p>
+                  <PartySizeField value={form.partySize} max={maxPartySize} onChange={changePartySize} />
+                </div>
                 {guestIndexes.length > 0 && (
                   <fieldset className="border-t border-[#f6f1e8]/10 pt-4">
-                    <legend className="eyebrow text-[#f6f1e8]/65">Guest names</legend>
+                    <legend className="eyebrow text-[#f6f1e8]/65">Additional guests</legend>
                     <div className="mt-3 space-y-3">
                       {guestIndexes.map((index) => (
-                        <Field key={index} label={`Guest ${index + 1}`} id={`guest-${index + 1}`}>
-                          <input id={`guest-${index + 1}`} required value={form.guestNames[index] ?? ""} onChange={(event) => changeGuest(index, event.target.value)} className={inputClass} />
+                        <Field key={index} label={`Guest ${index + 1} full name`} id={`guest-${index + 1}`}>
+                          <input id={`guest-${index + 1}`} required autoComplete="name" value={form.guestNames[index] ?? ""} onChange={(event) => changeGuest(index, event.target.value)} className={inputClass} />
                         </Field>
                       ))}
                     </div>
@@ -190,8 +212,8 @@ export function HousePartyRsvpExperience() {
                   <input required checked={form.ageConfirmed} onChange={(event) => setForm((current) => ({ ...current, ageConfirmed: event.target.checked }))} type="checkbox" className="mt-0.5 size-4 accent-[#c6a15b]" />
                   <span>I understand this is a private 21+ event and everyone in my RSVP must be 21+.</span>
                 </label>
-                <button disabled={busy} className="h-12 w-full bg-[#c6a15b] text-[0.7rem] font-semibold uppercase tracking-[0.18em] text-[#0f0f10] transition-colors hover:bg-[#f6f1e8] disabled:cursor-wait disabled:opacity-60" type="submit">
-                  {busy ? "Confirming…" : "Confirm Free RSVP"}
+                <button disabled={busy} className="h-12 w-full bg-[#c6a15b] text-[0.7rem] font-semibold uppercase tracking-[0.18em] text-[#0f0f10] shadow-[0_12px_30px_-18px_rgba(198,161,91,0.9)] transition-[background-color,transform,box-shadow] duration-300 hover:-translate-y-px hover:bg-[#e4c98a] hover:shadow-[0_16px_34px_-16px_rgba(228,201,138,0.95)] disabled:translate-y-0 disabled:cursor-wait disabled:opacity-70" type="submit">
+                  {busy ? "Confirming RSVP..." : "Confirm Free RSVP"}
                 </button>
                 <p className="text-center text-[0.58rem] font-semibold uppercase tracking-[0.13em] text-[#f6f1e8]/38">Free entry · No payment required</p>
               </form>
@@ -243,14 +265,15 @@ function Confirmation({ partySize }: { partySize: number }) {
       <Atmosphere />
       <div className="relative max-w-xl">
         <p className="eyebrow text-[#df8a42]">Free RSVP confirmed</p>
-        <h1 className="mt-4 font-headline text-[clamp(3rem,15vw,6rem)]">You&apos;re in.</h1>
+        <h1 className="mt-4 font-headline text-[clamp(3rem,15vw,6rem)]">You&apos;re in. 🔥</h1>
         <p className="mt-3 font-display text-3xl text-[#c6a15b]">Diwali × Halloween<br />House Party</p>
         <p className="mt-8 text-[0.68rem] font-semibold uppercase tracking-[0.16em] text-[#f6f1e8]/55">Your RSVP is confirmed for</p>
         <p className="mt-2 font-headline text-5xl text-[#f6f1e8]">{partySize} {partySize === 1 ? "Person" : "People"}</p>
         <p className="mt-7 text-sm font-semibold uppercase tracking-[0.15em] text-[#f6f1e8]/75">Tonight · 9 PM onwards</p>
-        <p className="mt-3 text-sm text-[#f6f1e8]/65">Location details will be shared privately.<br />BYOB · 21+ only</p>
+        <p className="mt-3 text-sm font-semibold uppercase tracking-[0.15em] text-[#f6f1e8]/75">21+ only · BYOB</p>
+        <p className="mx-auto mt-3 max-w-sm text-sm leading-6 text-[#f6f1e8]/65">{locationCopy}</p>
         <p className="mt-9 font-display text-2xl leading-none text-[#c6a15b]">Tonight is the trailer.<br />November 7 is the main event.</p>
-        <Link href={ticketHref} className="mt-9 inline-flex h-12 items-center bg-[#c6a15b] px-6 text-[0.67rem] font-semibold uppercase tracking-[0.15em] text-[#0f0f10] transition-colors hover:bg-[#f6f1e8]">Get Nov 7 Diwali Night Tickets</Link>
+        <Link href={ticketHref} className="mt-9 inline-flex h-12 items-center bg-[#c6a15b] px-6 text-[0.67rem] font-semibold uppercase tracking-[0.15em] text-[#0f0f10] transition-colors hover:bg-[#e4c98a]">Get Nov 7 Tickets</Link>
       </div>
     </main>
   );
@@ -262,7 +285,7 @@ function FullState() {
       <Atmosphere />
       <div className="relative max-w-lg">
         <p className="eyebrow text-[#df8a42]">Tonight</p>
-        <h1 className="mt-4 font-headline text-[clamp(3rem,15vw,5.7rem)]">House Full</h1>
+        <h1 className="mt-4 font-headline text-[clamp(3rem,15vw,5.7rem)]">House Full 🔥</h1>
         <p className="mt-5 text-sm font-semibold uppercase tracking-[0.15em] text-[#f6f1e8]/70">All 30 spots are claimed.</p>
         <p className="mt-8 font-display text-3xl text-[#c6a15b]">Tonight is the trailer.<br />November 7 is the main event.</p>
         <Link href={ticketHref} className="mt-9 inline-flex h-12 items-center bg-[#c6a15b] px-6 text-[0.67rem] font-semibold uppercase tracking-[0.15em] text-[#0f0f10] transition-colors hover:bg-[#f6f1e8]">Get Nov 7 Tickets</Link>
@@ -294,4 +317,101 @@ function Atmosphere() {
   );
 }
 
-const inputClass = "h-11 w-full rounded-[2px] border border-[#f6f1e8]/15 bg-black/20 px-3 text-sm text-[#f6f1e8] outline-none transition-colors placeholder:text-[#f6f1e8]/30 focus:border-[#c6a15b]";
+function PartySizeField({ value, max, onChange }: { value: number; max: number; onChange: (size: number) => void }) {
+  const [open, setOpen] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
+  const list = useRef<HTMLUListElement>(null);
+  const selected = partyOptions.find((option) => option.value === value) ?? partyOptions[0];
+
+  useEffect(() => {
+    if (!open) return;
+    list.current?.focus();
+    function onPointerDown(event: PointerEvent) {
+      if (!root.current?.contains(event.target as Node)) setOpen(false);
+    }
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [open]);
+
+  function move(direction: 1 | -1 | "start" | "end") {
+    const enabled = partyOptions.filter((option) => option.value <= max);
+    const index = enabled.findIndex((option) => option.value === value);
+    const next = direction === "start" ? enabled[0] : direction === "end" ? enabled[enabled.length - 1] : enabled[Math.min(enabled.length - 1, Math.max(0, index + direction))];
+    if (next) onChange(next.value);
+  }
+
+  function onListKeyDown(event: ReactKeyboardEvent<HTMLUListElement>) {
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      move(1);
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      move(-1);
+    } else if (event.key === "Home") {
+      event.preventDefault();
+      move("start");
+    } else if (event.key === "End") {
+      event.preventDefault();
+      move("end");
+    } else if (event.key === "Escape" || event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      setOpen(false);
+    }
+  }
+
+  return (
+    <div ref={root} className="relative">
+      <button
+        id="party-size"
+        type="button"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-labelledby="party-size-label party-size"
+        onClick={() => setOpen((current) => !current)}
+        onKeyDown={(event) => {
+          if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+            event.preventDefault();
+            setOpen(true);
+          }
+        }}
+        className="flex h-12 w-full items-center justify-between rounded-[2px] border border-[#c6a15b] bg-[#0f0f10] px-3 text-left text-sm uppercase tracking-[0.08em] text-[#f6f1e8] outline-none focus-visible:ring-2 focus-visible:ring-[#c6a15b]"
+      >
+        <span>{selected.label}</span>
+        <span aria-hidden className="text-[#c6a15b]">▾</span>
+      </button>
+      {open && (
+        <ul
+          ref={list}
+          id="party-size-list"
+          role="listbox"
+          aria-label="Number of people"
+          tabIndex={-1}
+          onKeyDown={onListKeyDown}
+          className="absolute z-30 mt-1 w-full rounded-[2px] border border-[#c6a15b] bg-[#141011] p-1 shadow-[0_18px_40px_-24px_rgba(0,0,0,1)] outline-none"
+        >
+          {partyOptions.map((option) => {
+            const unavailable = option.value > max;
+            const active = option.value === value;
+            return (
+              <li key={option.value} id={`party-size-${option.value}`} role="option" aria-selected={active} aria-disabled={unavailable}>
+                <button
+                  type="button"
+                  disabled={unavailable}
+                  onClick={() => {
+                    onChange(option.value);
+                    setOpen(false);
+                  }}
+                  className={`flex min-h-12 w-full items-center px-3 text-left text-sm uppercase tracking-[0.08em] disabled:cursor-not-allowed disabled:text-[#f6f1e8]/28 ${active ? "bg-[#c6a15b] text-[#0f0f10]" : "text-[#f6f1e8] hover:bg-[#c6a15b]/15"}`}
+                >
+                  {option.label}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+const inputClass = "h-12 w-full rounded-[2px] border border-[#f6f1e8]/15 bg-[#0f0f10] px-3 text-sm text-[#f6f1e8] outline-none transition-colors placeholder:text-[#f6f1e8]/30 focus:border-[#c6a15b]";

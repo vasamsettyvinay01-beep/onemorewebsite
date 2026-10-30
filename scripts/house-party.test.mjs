@@ -34,12 +34,14 @@ test("House Party public function enforces consent and only exposes safe outcome
 });
 
 test("House Party messaging uses actual people remaining", () => {
-  assert.match(helperSource, /if \(spots <= 5\) return `ONLY \$\{spots\} SPOT/);
+  assert.match(helperSource, /if \(spots === 1\) return "1 SPOT LEFT"/);
+  assert.match(helperSource, /return `ONLY \$\{spots\} SPOTS LEFT`/);
   assert.match(helperSource, /return `\$\{spots\} SPOTS LEFT`/);
   assert.match(formSource, /Only 30 People/);
-  assert.match(formSource, /Location details will be shared privately/);
+  assert.match(formSource, /We'll send the private location to your RSVP contact details/);
   assert.match(formSource, /everyone in my RSVP must be 21\+/);
-  assert.match(formSource, /Get Nov 7 Diwali Night Tickets/);
+  assert.match(formSource, /Get Nov 7 Tickets/);
+  assert.match(formSource, /role="listbox"/);
   assert.match(announcementSource, /getHousePartyStatus/);
   assert.match(announcementSource, /status\.state === "ended"\) return null/);
 });

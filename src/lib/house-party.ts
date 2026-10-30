@@ -54,6 +54,8 @@ export async function submitHousePartyRsvp(input: {
 }
 
 export function spotsLabel(spots: number): string {
-  if (spots <= 5) return `ONLY ${spots} SPOT${spots === 1 ? "" : "S"} LEFT`;
+  if (spots <= 0) return "HOUSE FULL";
+  if (spots === 1) return "1 SPOT LEFT";
+  if (spots <= 5) return `ONLY ${spots} SPOTS LEFT`;
   return `${spots} SPOTS LEFT`;
 }

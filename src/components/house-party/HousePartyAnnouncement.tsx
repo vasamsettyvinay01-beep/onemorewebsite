@@ -29,14 +29,16 @@ export function HousePartyAnnouncement() {
           <div className="min-w-0 flex-1">
             <p className="eyebrow text-[#df8a42]">Tonight</p>
             <p className="mt-1 font-headline text-[1.05rem] text-ivory sm:text-[1.2rem]">Diwali × Halloween House Party</p>
-            <p className="mt-1 text-[0.62rem] font-semibold uppercase tracking-[0.15em] text-ivory/65">Free · 21+ · Only 30 spots</p>
+            <p className="mt-1 text-[0.62rem] font-semibold uppercase tracking-[0.15em] text-ivory/65">Free · 21+</p>
+            <p className="mt-1 text-[0.62rem] font-semibold uppercase tracking-[0.15em] text-[#c6a15b]">
+              {status.state === "full" ? "House full" : spotsLabel(status.spotsRemaining)}
+            </p>
           </div>
           <Link
-            href={status.state === "full" ? "/checkout?event=diwali-night" : "/house-party"}
-            className="shrink-0 rounded-[2px] bg-[#c6a15b] px-3 py-2.5 text-center text-[0.62rem] font-semibold uppercase tracking-[0.15em] text-[#0f0f10] transition-colors hover:bg-[#f6f1e8]"
+            href="/house-party"
+            className="shrink-0 rounded-[2px] bg-[#c6a15b] px-3 py-3 text-center text-[0.62rem] font-semibold uppercase tracking-[0.15em] text-[#0f0f10] transition-colors hover:bg-[#f6f1e8]"
           >
-            <span className="block">{status.state === "full" ? "Get Nov 7 Tickets" : "RSVP now"}</span>
-            <span className="mt-1 block text-[0.54rem] tracking-[0.1em]">{status.state === "full" ? "House full" : spotsLabel(status.spotsRemaining)}</span>
+            {status.state === "full" ? "House full" : "RSVP now"}
           </Link>
         </div>
       </div>
