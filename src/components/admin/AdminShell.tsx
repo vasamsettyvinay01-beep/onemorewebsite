@@ -39,8 +39,11 @@ const NAV = [
   { href: "/admin/refunds", label: "Refunds" },
   { href: "/admin/complimentary", label: "Complimentary" },
   { href: "/admin/promos", label: "Promo codes" },
+  { href: "/admin/vip", label: "VIP" },
   { href: "/admin/staff", label: "Staff" },
 ];
+
+const SUPER_ADMIN_ONLY = new Set(["/admin/complimentary", "/admin/promos", "/admin/vip"]);
 
 export function AdminShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
@@ -292,7 +295,7 @@ export function AdminShell({ children }: { children: ReactNode }) {
           </label>
           <nav className="flex gap-1 overflow-x-auto px-3 pb-3 md:flex-1 md:flex-col md:overflow-visible md:px-2">
             {NAV.map((item) => {
-              if ((item.href === "/admin/complimentary" || item.href === "/admin/promos") && value.role !== "super_admin") return null;
+              if (SUPER_ADMIN_ONLY.has(item.href) && value.role !== "super_admin") return null;
               const active = item.exact ? pathname === item.href : pathname.startsWith(item.href);
               return (
                 <Link key={item.href} href={item.href} className={cn("shrink-0 rounded-md px-2.5 py-2 text-sm", active ? "bg-white/10 text-white" : "text-white/65 hover:bg-white/5")}>

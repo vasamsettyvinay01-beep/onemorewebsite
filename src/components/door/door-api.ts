@@ -41,6 +41,33 @@ export interface DoorStats {
   guests: number;
   inside: number;
   byTier: Record<string, { sold: number; in: number }>;
+  vip?: { allocated: number; admitted: number };
+}
+
+/** A VIP group as the door sees it. No contact details or internal ids. */
+export interface VipGroup {
+  code: string;
+  table: string;
+  host: string;
+  capacity: number;
+  admitted: number;
+  remaining: number;
+  status: "issued" | "partially_admitted" | "fully_admitted" | "revoked" | "cancelled";
+  lastEntryAt: string | null;
+}
+
+export interface VipScan {
+  outcome: "vip";
+  vip: VipGroup;
+}
+
+export type ScanResponse = ScanResult | VipScan;
+
+export interface VipAdmitResult {
+  outcome: "vip-admitted" | "vip-rejected" | "not-found" | "invalid-count";
+  reason?: string;
+  admittedNow?: number;
+  vip: VipGroup | null;
 }
 
 export interface GuestOrder {

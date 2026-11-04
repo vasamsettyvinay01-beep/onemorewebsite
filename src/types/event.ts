@@ -65,7 +65,7 @@ export interface TicketTier {
   /** Price in the smallest currency unit (cents). */
   priceCents: number;
   currency: string;
-  /** Price isn't fixed (e.g. VIP tables) — shown as "On request" and never sold through checkout. */
+  /** Price isn't fixed — shown as "On request" and never sold through checkout. */
   priceOnRequest?: boolean;
   /** Direct enquiry options for request-only tiers. Labels are shown instead of the raw phone number. */
   inquiryEmail?: string;

@@ -71,6 +71,7 @@ const nextConfig = {
       // Listed after the catch-all so these replace Referrer-Policy on share pages.
       { source: "/tickets/shared", headers: sharedHeaders },
       { source: "/ticket/shared", headers: sharedHeaders },
+      { source: "/vip", headers: [...sharedHeaders, { key: "X-Robots-Tag", value: "noindex, nofollow" }] },
       {
         source: "/admin",
         headers: [

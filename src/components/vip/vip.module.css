@@ -1,0 +1,111 @@
+.surface {
+  background-color: #0f0f10;
+  background-image:
+    radial-gradient(70% 42% at 50% 0%, rgba(198, 161, 91, 0.09), transparent 72%),
+    radial-gradient(50% 30% at 50% 100%, rgba(246, 241, 232, 0.025), transparent 70%);
+}
+
+/* Paper tooth. Static, low opacity, never animated. */
+.grain {
+  pointer-events: none;
+  position: fixed;
+  inset: 0;
+  opacity: 0.05;
+  mix-blend-mode: soft-light;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 0.9 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+}
+
+.card {
+  background: linear-gradient(180deg, #161617 0%, #111112 100%);
+  box-shadow:
+    0 1px 0 rgba(246, 241, 232, 0.04) inset,
+    0 32px 70px -44px rgba(0, 0, 0, 0.95);
+}
+
+/* The only metallic detail: a hairline catching light along the top edge. */
+.sheen {
+  background: linear-gradient(90deg, transparent, rgba(228, 210, 172, 0.55) 50%, transparent);
+}
+
+.tile {
+  transition:
+    border-color 600ms cubic-bezier(0.16, 1, 0.3, 1),
+    transform 600ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.tile:hover {
+  border-color: rgba(198, 161, 91, 0.45);
+  transform: translateY(-1px);
+}
+
+.fade {
+  animation: vip-fade 1100ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.rise {
+  animation: vip-rise 1000ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.draw {
+  transform-origin: center;
+  animation: vip-draw 1400ms cubic-bezier(0.16, 1, 0.3, 1) 280ms both;
+}
+
+.reveal {
+  animation: vip-reveal 1100ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes vip-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes vip-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes vip-draw {
+  from {
+    opacity: 0;
+    transform: scaleX(0);
+  }
+  to {
+    opacity: 1;
+    transform: scaleX(1);
+  }
+}
+
+@keyframes vip-reveal {
+  from {
+    opacity: 0;
+    clip-path: inset(0 0 100% 0);
+  }
+  to {
+    opacity: 1;
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fade,
+  .rise,
+  .draw,
+  .reveal {
+    animation: none;
+  }
+
+  .tile {
+    transition: none;
+  }
+}

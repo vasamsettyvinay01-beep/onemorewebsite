@@ -33,6 +33,12 @@ export const PERMISSIONS = {
   promo_report: ["super_admin"],
   issue_complimentary: ["super_admin"],
   resend_complimentary: ["super_admin"],
+  vip_list: ["super_admin"],
+  vip_view: ["super_admin"],
+  vip_preview: ["super_admin"],
+  vip_issue: ["super_admin"],
+  vip_resend: ["super_admin"],
+  vip_revoke: ["super_admin"],
   scan: ["super_admin", "admin", "door_staff"],
   admit: ["super_admin", "admin", "door_staff"],
   stats: ["super_admin", "admin", "door_staff"],
@@ -127,6 +133,9 @@ const READ_LIMITS = new Set([
   "audit",
   "complimentary_list",
   "promo_report",
+  "vip_list",
+  "vip_view",
+  "vip_preview",
 ]);
 
 export function rateLimitFor(action) {
@@ -137,6 +146,7 @@ export function rateLimitFor(action) {
     || action === "cancel_confirm"
     || action === "issue_complimentary"
     || action === "resend_complimentary"
+    || action === "vip_revoke"
   ) {
     return { limit: action === "login_failed" ? 8 : 5, windowSeconds: 600 };
   }

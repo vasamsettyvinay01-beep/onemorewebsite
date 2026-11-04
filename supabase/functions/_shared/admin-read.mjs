@@ -18,6 +18,9 @@ export const OPEN_MUTATIONS = [
   "staff_set",
   "issue_complimentary",
   "resend_complimentary",
+  "vip_issue",
+  "vip_resend",
+  "vip_revoke",
 ];
 
 export const READ_ACTIONS = [
@@ -33,6 +36,9 @@ export const READ_ACTIONS = [
   "audit",
   "complimentary_list",
   "promo_report",
+  "vip_list",
+  "vip_view",
+  "vip_preview",
 ];
 
 const PAYMENT_STATES = ["paid", "refunded", "partially-refunded", "disputed"];

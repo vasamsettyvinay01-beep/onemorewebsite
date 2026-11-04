@@ -55,6 +55,19 @@ import {
   zoneForVenue,
 } from "../_shared/admin-read.mjs";
 import { parsePromoFilter, promoLabel } from "../_shared/promo.mjs";
+import {
+  parseVipCapacity,
+  parseVipCode,
+  parseVipHostName,
+  parseVipNote,
+  parseVipPhone,
+  parseVipTableLabel,
+  revokePhraseOk,
+  vipRemaining,
+  vipStatusLabel,
+  vipSummary,
+} from "../_shared/vip.mjs";
+import { renderVipPreview, sendVipInvitationEmail, vipPassUrl } from "../_shared/vip-delivery.ts";
 
 // Canonical names live on the server. Cancellation must match this, not a name the browser sends.
 const EVENT_NAMES: Record<string, string> = {
@@ -199,6 +212,18 @@ Deno.serve(async (req) => {
         return asResult(req, await staffList(actor));
       case "staff_set":
         return asResult(req, await staffSet(actor, body, ip, ua));
+      case "vip_list":
+        return asResult(req, await vipList(body));
+      case "vip_view":
+        return asResult(req, await vipView(body));
+      case "vip_preview":
+        return asResult(req, await vipPreview(body));
+      case "vip_issue":
+        return asResult(req, await vipIssue(actor, body, ip, ua));
+      case "vip_resend":
+        return asResult(req, await vipResend(actor, body, ip, ua));
+      case "vip_revoke":
+        return asResult(req, await vipRevoke(actor, body, ip, ua));
       default:
         return json(req, { error: "Unknown action" }, 400);
     }
@@ -983,11 +1008,13 @@ async function auditPage(actor: Actor, body: Record<string, unknown>) {
     .select("created_at, actor_id, actor_role, action, resource_type, resource_id, summary", { count: "exact" })
     .order("created_at", { ascending: false });
   if (actor.role !== "super_admin") {
-    entries = entries.not(
-      "action",
-      "in",
-      "(COMPLIMENTARY_PASSES_ISSUED,COMPLIMENTARY_EMAIL_RESENT,COMPLIMENTARY_EMAIL_FAILED)",
-    );
+    entries = entries
+      .not(
+        "action",
+        "in",
+        "(COMPLIMENTARY_PASSES_ISSUED,COMPLIMENTARY_EMAIL_RESENT,COMPLIMENTARY_EMAIL_FAILED)",
+      )
+      .not("action", "like", "VIP_%");
   }
   const [{ data, error, count }, staff] = await Promise.all([
     entries.range(page.from, page.to),
@@ -1397,6 +1424,279 @@ async function inviteStaff(email: string): Promise<{ id: string } | string> {
     return "Could not invite that email.";
   }
   return { id: data.user.id };
+}
+
+// Private VIP invitations. Super admin only (see PERMISSIONS). Separate from
+// orders, tickets, tiers, promotions, and Stripe. Capacity 1–6 is checked here,
+// in the issue RPC, and by a table constraint.
+interface VipRow {
+  id: string;
+  event_id: string;
+  table_label: string;
+  host_name: string;
+  email: string;
+  phone: string | null;
+  admin_note: string | null;
+  capacity: number;
+  admitted: number;
+  status: string;
+  token: string;
+  code: string;
+  issued_by: string | null;
+  email_sent_at: string | null;
+  email_count: number;
+  last_entry_at: string | null;
+  revoked_at: string | null;
+  revoked_by: string | null;
+  created_at: string;
+}
+
+const VIP_COLUMNS =
+  "id, event_id, table_label, host_name, email, phone, admin_note, capacity, admitted, status, token, code, issued_by, email_sent_at, email_count, last_entry_at, revoked_at, revoked_by, created_at";
+
+function vipRowOut(row: VipRow) {
+  return {
+    code: row.code,
+    table: row.table_label,
+    host: row.host_name,
+    email: row.email,
+    capacity: row.capacity,
+    admitted: row.admitted,
+    remaining: vipRemaining(row.capacity, row.admitted),
+    status: row.status,
+    statusLabel: vipStatusLabel(row.status),
+    issuedAt: row.created_at,
+    lastEntryAt: row.last_entry_at,
+    emailStatus: emailLabel(row.email_sent_at),
+    emailCount: row.email_count,
+  };
+}
+
+async function loadVip(eventId: string, code: string): Promise<VipRow | null> {
+  const { data, error } = await admin.from("vip_invitations").select(VIP_COLUMNS).eq("event_id", eventId).eq("code", code).maybeSingle();
+  if (error) throw error;
+  return (data as VipRow | null) ?? null;
+}
+
+interface VipInput {
+  eventId: string;
+  capacity: number;
+  host: string;
+  email: string;
+  table: string;
+  phone: string;
+  note: string;
+}
+
+function vipInput(body: Record<string, unknown>): VipInput | { error: string } {
+  const eventId = textEvent(body);
+  if (!eventId) return { error: "eventId required" };
+  const capacity = parseVipCapacity(body.capacity);
+  if (capacity == null) return { error: "Access must be between 1 and 6 guests." };
+  const host = parseVipHostName(body.name);
+  if (!host) return { error: "Enter the primary guest's name." };
+  const email = parseStaffEmail(body.email);
+  if (!email) return { error: "Enter a valid email address." };
+  const table = parseVipTableLabel(body.table);
+  if (!table) return { error: "Enter a VIP table or group label (up to 40 characters)." };
+  const phone = parseVipPhone(body.phone);
+  if (phone == null) return { error: "Enter a valid phone number or leave it empty." };
+  const note = parseVipNote(body.note);
+  if (note == null) return { error: "Admin notes are limited to 200 characters." };
+  return { eventId, capacity, host, email, table, phone, note };
+}
+
+async function vipList(body: Record<string, unknown>) {
+  const eventId = textEvent(body);
+  if (!eventId) return { error: "eventId required" };
+  const { data, error } = await admin
+    .from("vip_invitations")
+    .select(VIP_COLUMNS)
+    .eq("event_id", eventId)
+    .order("created_at", { ascending: false })
+    .limit(500);
+  if (error) throw error;
+  const rows = (data ?? []) as VipRow[];
+  return { summary: vipSummary(rows), invitations: rows.map(vipRowOut) };
+}
+
+async function vipView(body: Record<string, unknown>) {
+  const eventId = textEvent(body);
+  const code = parseVipCode(body.code);
+  if (!eventId || !code) return { error: "VIP invitation not found." };
+  const row = await loadVip(eventId, code);
+  if (!row) return { error: "VIP invitation not found." };
+  const [{ data: admissions, error }, staff] = await Promise.all([
+    admin
+      .from("vip_admissions")
+      .select("guests, admitted_after, scanned_by, device, created_at")
+      .eq("invitation_id", row.id)
+      .order("created_at"),
+    admin.from("staff_roles").select("user_id, email"),
+  ]);
+  if (error) throw error;
+  if (staff.error) throw staff.error;
+  const people = new Map((staff.data ?? []).map((person) => [person.user_id as string, person.email as string]));
+  return {
+    invitation: {
+      ...vipRowOut(row),
+      phone: row.phone,
+      note: row.admin_note,
+      issuedBy: row.issued_by ? people.get(row.issued_by) ?? "Super admin" : null,
+      revokedAt: row.revoked_at,
+      revokedBy: row.revoked_by ? people.get(row.revoked_by) ?? "Super admin" : null,
+      passUrl: vipPassUrl(row.token),
+    },
+    admissions: (admissions ?? []).map((entry) => ({
+      guests: entry.guests,
+      admittedAfter: entry.admitted_after,
+      operator: entry.scanned_by,
+      device: entry.device,
+      at: entry.created_at,
+    })),
+  };
+}
+
+type ActionResult = { error?: string } & Record<string, unknown>;
+
+async function vipPreview(body: Record<string, unknown>): Promise<ActionResult> {
+  const input = vipInput(body);
+  if ("error" in input) return input;
+  const preview = await renderVipPreview({ hostName: input.host, table: input.table, capacity: input.capacity }, input.eventId);
+  if (!preview) return { error: "Event not found" };
+  return {
+    subject: preview.email.subject,
+    html: preview.email.html,
+    pass: {
+      status: "issued",
+      table: input.table,
+      host: input.host,
+      capacity: input.capacity,
+      admitted: 0,
+      remaining: input.capacity,
+      code: preview.code,
+      event: preview.event,
+      partners: preview.partners,
+    },
+  };
+}
+
+async function deliverVip(row: VipRow, actor: Actor, ip: string, ua: string, action: "VIP_INVITATION_SENT" | "VIP_INVITATION_RESENT") {
+  try {
+    await sendVipInvitationEmail(
+      { to: row.email, hostName: row.host_name, table: row.table_label, capacity: row.capacity, code: row.code, token: row.token },
+      row.event_id,
+    );
+  } catch (err) {
+    console.error(JSON.stringify({ msg: "vip_email_failed", code: row.code, error: (err as Error).message?.slice(0, 200) }));
+    await audit(actor, "VIP_EMAIL_FAILED", "vip", row.id, { code: row.code, email: row.email }, ip, ua);
+    return false;
+  }
+  const marked = await admin
+    .from("vip_invitations")
+    .update({ email_sent_at: new Date().toISOString(), email_count: row.email_count + 1 })
+    .eq("id", row.id);
+  if (marked.error) console.error(JSON.stringify({ msg: "vip_email_mark_failed", code: row.code }));
+  await audit(actor, action, "vip", row.id, {
+    code: row.code,
+    email: row.email,
+    table: row.table_label,
+    capacity: row.capacity,
+  }, ip, ua);
+  return true;
+}
+
+async function vipIssue(actor: Actor, body: Record<string, unknown>, ip: string, ua: string): Promise<ActionResult> {
+  const input = vipInput(body);
+  if ("error" in input) return input;
+  const idempotencyKey = parseIdempotencyKey(body.idempotencyKey);
+  if (!idempotencyKey) return { error: "Refresh the page and try again." };
+  const tiers = (await loadTiers()).filter((tier) => tier.event_id === input.eventId);
+  if (!tiers.length) return { error: "Event not found" };
+
+  const { data, error } = await admin.rpc("issue_vip_invitation", {
+    p_event_id: input.eventId,
+    p_table_label: input.table,
+    p_host_name: input.host,
+    p_email: input.email,
+    p_phone: input.phone || null,
+    p_admin_note: input.note || null,
+    p_capacity: input.capacity,
+    p_idempotency_key: idempotencyKey,
+    p_issued_by: actor.id,
+  });
+  if (error) throw error;
+  const result = (Array.isArray(data) ? data[0] : data) as { invitation_id: string | null; outcome: string } | null;
+  if (result?.outcome === "table_taken") return { error: `${input.table} already has an active VIP invitation.` };
+  if (result?.outcome === "idempotency_mismatch") return { error: "This send request was already used with different details." };
+  if (!result?.invitation_id || result.outcome === "rejected") return { error: "The VIP invitation could not be created." };
+
+  const { data: rowData, error: rowError } = await admin.from("vip_invitations").select(VIP_COLUMNS).eq("id", result.invitation_id).single();
+  if (rowError) throw rowError;
+  const row = rowData as VipRow;
+  if (result.outcome === "created") {
+    await audit(actor, "VIP_INVITATION_ISSUED", "vip", row.id, {
+      code: row.code,
+      email: row.email,
+      table: row.table_label,
+      capacity: row.capacity,
+    }, ip, ua);
+  }
+  if (result.outcome === "exists" && row.email_sent_at) {
+    return { ok: true, created: false, invitation: vipRowOut(row), message: `The invitation for ${row.table_label} was already sent.` };
+  }
+  const sent = await deliverVip(row, actor, ip, ua, "VIP_INVITATION_SENT");
+  return {
+    ok: sent,
+    created: result.outcome === "created",
+    invitation: { ...vipRowOut(row), emailStatus: sent ? "Sent" : "Not sent" },
+    message: sent
+      ? `The VIP invitation for ${row.table_label} was sent to ${row.email}.`
+      : `The VIP invitation for ${row.table_label} was created, but the email was not sent. Use Resend from the list below.`,
+  };
+}
+
+async function vipResend(actor: Actor, body: Record<string, unknown>, ip: string, ua: string) {
+  const eventId = textEvent(body);
+  const code = parseVipCode(body.code);
+  if (!eventId || !code) return { error: "VIP invitation not found." };
+  const row = await loadVip(eventId, code);
+  if (!row) return { error: "VIP invitation not found." };
+  if (row.status === "revoked" || row.status === "cancelled") return { error: "A revoked or cancelled invitation cannot be resent." };
+  const sent = await deliverVip(row, actor, ip, ua, "VIP_INVITATION_RESENT");
+  return sent
+    ? { ok: true, code: row.code, message: `The same VIP invitation was sent again to ${row.email}.` }
+    : { ok: false, code: row.code, message: "The email could not be sent. Try again." };
+}
+
+async function vipRevoke(actor: Actor, body: Record<string, unknown>, ip: string, ua: string) {
+  const eventId = textEvent(body);
+  const code = parseVipCode(body.code);
+  if (!eventId || !code) return { error: "VIP invitation not found." };
+  if (!revokePhraseOk(body.confirm)) return { error: "Type REVOKE to confirm." };
+  const { data, error } = await admin
+    .from("vip_invitations")
+    .update({ status: "revoked", revoked_at: new Date().toISOString(), revoked_by: actor.id })
+    .eq("event_id", eventId)
+    .eq("code", code)
+    .in("status", ["issued", "partially_admitted"])
+    .select(VIP_COLUMNS)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) {
+    const current = await loadVip(eventId, code);
+    if (!current) return { error: "VIP invitation not found." };
+    if (current.status === "fully_admitted") return { error: "Every admission on this invitation has already been used." };
+    return { error: "This invitation is already revoked or cancelled." };
+  }
+  const row = data as VipRow;
+  await audit(actor, "VIP_INVITATION_REVOKED", "vip", row.id, {
+    code: row.code,
+    table: row.table_label,
+    capacity: row.capacity,
+    admitted: row.admitted,
+  }, ip, ua);
+  return { ok: true, invitation: vipRowOut(row), message: `${row.table_label} was revoked. The pass will no longer admit anyone.` };
 }
 
 // Cancellation stays off. The name check stays in source so a later release

@@ -124,7 +124,7 @@ export const events: OneMoreEvent[] = [
     // then set status: "on-sale".
     ticketTiers: [
       // Every public pass is listed. Early Bird stays on the list as sold out
-      // once its 10 are gone. VIP Tables is enquiry-only.
+      // once its 10 are gone. Private table invitations are never listed here.
       {
         id: "early-bird",
         name: "Early Bird",
@@ -157,16 +157,6 @@ export const events: OneMoreEvent[] = [
         priceCents: 8999,
         currency: "USD",
         admits: 5,
-      },
-      {
-        id: "vip",
-        name: "VIP Tables",
-        priceCents: 0,
-        currency: "USD",
-        priceOnRequest: true,
-        description: "For VIP table availability and reservations, contact our team.",
-        inquiryEmail: "contact@theonemorecompany.com",
-        inquiryWhatsApp: "15185967630",
       },
     ],
   },

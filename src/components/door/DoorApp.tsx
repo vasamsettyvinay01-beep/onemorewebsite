@@ -17,8 +17,12 @@ import {
   type DoorSessionSource,
   type DoorStats,
   type GuestOrder,
+  type ScanResponse,
   type ScanResult,
+  type VipGroup,
+  type VipScan,
 } from "./door-api";
+import { VipDoorPanel } from "./VipDoorPanel";
 
 const DEVICE_KEY = "omc-door-device";
 /** After an admit, ignore the same code this long so a guest still holding it up isn't flagged as a repeat. */
@@ -386,6 +390,11 @@ function DoorConsole() {
             {stats ? stats.inside : "–"}
             <span className="text-lg text-ivory/50"> / {stats ? stats.guests : "–"} inside</span>
           </p>
+          {stats?.vip && stats.vip.allocated > 0 && (
+            <p className="mt-1 text-[0.62rem] font-semibold uppercase tracking-[0.2em] text-gold">
+              VIP · {stats.vip.admitted} / {stats.vip.allocated} in
+            </p>
+          )}
         </div>
         <button
           type="button"
@@ -438,11 +447,22 @@ function Scanner({ eventId, onScanned }: { eventId: string; onScanned: () => voi
   const lastAdmit = useRef<{ token: string; at: number } | null>(null);
   const dismissTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const [result, setResult] = useState<ScanResult | { outcome: "error" } | null>(null);
+  const [vip, setVip] = useState<VipGroup | null>(null);
+  const vipToken = useRef<string | null>(null);
   const [cameraError, setCameraError] = useState<string | null>(null);
 
   const dismiss = useCallback(() => {
     clearTimeout(dismissTimer.current);
     setResult(null);
+    busy.current = false;
+  }, []);
+
+  // The same VIP code stays valid for later arrivals, so closing only pauses it
+  // briefly; a guest still holding it up does not reopen the panel at once.
+  const closeVip = useCallback(() => {
+    if (vipToken.current) lastAdmit.current = { token: vipToken.current, at: Date.now() };
+    vipToken.current = null;
+    setVip(null);
     busy.current = false;
   }, []);
 
@@ -457,7 +477,15 @@ function Scanner({ eventId, onScanned }: { eventId: string; onScanned: () => voi
       if (recent && recent.token === token && Date.now() - recent.at < SAME_CODE_GRACE_MS) return;
       busy.current = true;
       try {
-        const r = await doorCall<ScanResult>({ action: "scan", eventId, token, device: device() });
+        const response = await doorCall<ScanResponse>({ action: "scan", eventId, token, device: device() });
+        if (response.outcome === "vip") {
+          feedback(true);
+          vipToken.current = token;
+          setVip((response as VipScan).vip);
+          onScanned();
+          return;
+        }
+        const r = response as ScanResult;
         if (r.outcome === "admitted") lastAdmit.current = { token, at: Date.now() };
         feedback(r.outcome === "admitted");
         setResult(r);
@@ -501,12 +529,13 @@ function Scanner({ eventId, onScanned }: { eventId: string; onScanned: () => voi
           {cameraError}
         </div>
       )}
-      {!cameraError && !result && (
+      {!cameraError && !result && !vip && (
         <p className="pointer-events-none absolute inset-x-0 bottom-6 text-center text-xs font-semibold uppercase tracking-[0.22em] text-white/80">
           Point at a ticket QR
         </p>
       )}
       {result && <Verdict result={result} onDismiss={dismiss} />}
+      {vip && <VipDoorPanel key={vip.code} eventId={eventId} group={vip} device={device()} onClose={closeVip} onAdmitted={onScanned} feedback={feedback} />}
     </div>
   );
 }
@@ -567,6 +596,8 @@ function Verdict({ result, onDismiss }: { result: ScanResult | { outcome: "error
 function Guests({ eventId, onAdmitted }: { eventId: string; onAdmitted: () => void }) {
   const [q, setQ] = useState("");
   const [orders, setOrders] = useState<GuestOrder[]>([]);
+  const [vipGroups, setVipGroups] = useState<VipGroup[]>([]);
+  const [openVip, setOpenVip] = useState<VipGroup | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -574,11 +605,13 @@ function Guests({ eventId, onAdmitted }: { eventId: string; onAdmitted: () => vo
     async (term: string) => {
       if (term.trim().length < 2) {
         setOrders([]);
+        setVipGroups([]);
         return;
       }
       try {
-        const r = await doorCall<{ orders: GuestOrder[] }>({ action: "search", eventId, q: term });
+        const r = await doorCall<{ orders: GuestOrder[]; vip?: VipGroup[] }>({ action: "search", eventId, q: term });
         setOrders(r.orders);
+        setVipGroups(r.vip ?? []);
       } catch {
         setMessage("Search failed — check connection.");
       }
@@ -610,16 +643,66 @@ function Guests({ eventId, onAdmitted }: { eventId: string; onAdmitted: () => vo
     }
   }
 
+  async function openGroup(code: string) {
+    setBusyId(code);
+    setMessage(null);
+    try {
+      const r = await doorCall<ScanResponse>({ action: "vip_lookup", eventId, code });
+      if (r.outcome === "vip") setOpenVip((r as VipScan).vip);
+      else setMessage("That VIP pass was not found for this event.");
+    } catch (err) {
+      if (err instanceof DoorAuthError) {
+        await signOutDoor();
+        return;
+      }
+      setMessage("Couldn't open — check connection.");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  const closeGroup = useCallback(() => {
+    setOpenVip(null);
+    void search(q);
+  }, [q, search]);
+
   return (
+    <>
     <div className="absolute inset-0 overflow-y-auto px-4 pb-10 pt-4">
       <input
         type="search"
-        placeholder="Search name or email"
+        placeholder="Search name, email, or VIP table"
         value={q}
         onChange={(e) => setQ(e.target.value)}
         className="h-12 w-full rounded-md border border-ivory/20 bg-ivory/5 px-4 text-base text-ivory focus:border-gold focus:outline-none"
       />
       {message && <p className="mt-3 text-sm text-gold">{message}</p>}
+      {vipGroups.length > 0 && (
+        <ul className="mt-4 flex flex-col gap-3">
+          {vipGroups.map((group) => {
+            const inactive = group.status === "revoked" || group.status === "cancelled";
+            return (
+              <li key={group.code} className="flex items-center justify-between gap-3 rounded-md border border-gold/50 bg-[#0F0F10] p-4">
+                <span className="min-w-0">
+                  <span className="text-[0.6rem] font-bold uppercase tracking-[0.28em] text-gold">VIP Access</span>
+                  <span className="mt-1 block truncate font-semibold">{group.table} · {group.host}</span>
+                  <span className="block text-xs text-ivory/55">
+                    {inactive ? "Revoked" : `${group.admitted} of ${group.capacity} in · ${group.remaining} remaining`}
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  disabled={busyId === group.code}
+                  onClick={() => void openGroup(group.code)}
+                  className="shrink-0 rounded-md bg-gold px-4 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-rich disabled:opacity-50"
+                >
+                  Open
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
       <ul className="mt-4 flex flex-col gap-3">
         {orders.map((o) => (
           <li key={o.id} className="rounded-md border border-ivory/10 p-4">
@@ -655,6 +738,10 @@ function Guests({ eventId, onAdmitted }: { eventId: string; onAdmitted: () => vo
         ))}
       </ul>
     </div>
+    {openVip && (
+      <VipDoorPanel key={openVip.code} eventId={eventId} group={openVip} device={device()} onClose={closeGroup} onAdmitted={onAdmitted} feedback={feedback} />
+    )}
+    </>
   );
 }
 

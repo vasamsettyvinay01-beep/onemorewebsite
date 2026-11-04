@@ -27,5 +27,8 @@ verify_jwt = false
 [functions.admin]
 verify_jwt = false
 
+[functions.vip-pass]
+verify_jwt = false
+
 [functions.create-checkout-session]
 verify_jwt = false

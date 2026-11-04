@@ -30,15 +30,9 @@ test("the public ticket menu has the intended five choices", () => {
     ],
   );
   assert.equal(event.ticketTiers.some((tier) => tier.id === "group-8"), false);
-  const vip = event.ticketTiers.find((tier) => tier.id === "vip");
-  assert.equal(vip?.name, "VIP Tables");
-  assert.equal(vip?.hidden, undefined);
-  assert.equal(vip?.priceOnRequest, true);
-  assert.equal(vip?.inquiryEmail, "contact@theonemorecompany.com");
-  assert.equal(vip?.inquiryWhatsApp, "15185967630");
-  assert.match(ticketSheetSource, /Email us/);
-  assert.match(ticketSheetSource, /WhatsApp us/);
-  assert.match(ticketSheetSource, /wa\.me/);
+  assert.equal(event.ticketTiers.length, publicTiers.length);
+  assert.equal(event.ticketTiers.some((tier) => /vip/i.test(`${tier.id} ${tier.name}`)), false);
+  assert.match(ticketSheetSource, /Continue to payment/);
 });
 
 test("every tier and quantity produces the exact number of individual passes", () => {
