@@ -35,6 +35,7 @@ export const READ_ACTIONS = [
   "sales",
   "audit",
   "complimentary_list",
+  "complimentary_preview",
   "promo_report",
   "vip_list",
   "vip_view",
@@ -90,8 +91,10 @@ export function parseComplimentaryName(value) {
 }
 
 export function parseComplimentaryCount(value) {
+  if (typeof value !== "number" && typeof value !== "string") return null;
+  if (typeof value === "string" && !/^\d+$/.test(value.trim())) return null;
   const count = Number(value);
-  return Number.isInteger(count) && count >= 1 && count <= 50 ? count : null;
+  return Number.isInteger(count) && count >= 1 && count <= 10 ? count : null;
 }
 
 export function parseIdempotencyKey(value) {

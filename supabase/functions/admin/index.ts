@@ -5,7 +5,7 @@
 
 import Stripe from "npm:stripe@17";
 import { admin, corsHeaders, json } from "../_shared/http.ts";
-import { sendOrderTicketEmail } from "../_shared/order-email.ts";
+import { renderComplimentaryPreview, sendComplimentaryInvitation } from "../_shared/complimentary-delivery.ts";
 import {
   canAssignRole,
   permit,
@@ -19,7 +19,6 @@ import {
 import {
   checkInPercent,
   cleanSearch,
-  complimentaryPhraseOk,
   dayKey,
   displayScanResult,
   displayTicketStatus,
@@ -198,6 +197,8 @@ Deno.serve(async (req) => {
         return asResult(req, await auditPage(actor, body));
       case "complimentary_list":
         return asResult(req, await complimentaryList(body));
+      case "complimentary_preview":
+        return asResult(req, await complimentaryPreview(body));
       case "promo_report":
         return asResult(req, await promoReport(body));
       case "issue_complimentary":
@@ -1068,8 +1069,10 @@ interface ComplimentaryOrder {
   quantity: number;
   purchaser_name: string | null;
   purchaser_email: string;
+  issued_by: string | null;
   emailed_at: string | null;
   created_at: string;
+  tickets: { status: string }[];
 }
 
 async function complimentaryList(body: Record<string, unknown>) {
@@ -1078,76 +1081,109 @@ async function complimentaryList(body: Record<string, unknown>) {
   const page = parsePage(body.page, body.pageSize);
   if (!page) return { error: "Bad filter" };
 
-  const [{ data, error, count }, totalTickets] = await Promise.all([
+  const [{ data, error, count }, metrics] = await Promise.all([
     admin
       .from("orders")
-      .select("id, event_id, tier_id, tier_name, quantity, purchaser_name, purchaser_email, emailed_at, created_at", { count: "exact" })
+      .select("id, event_id, tier_id, tier_name, quantity, purchaser_name, purchaser_email, issued_by, emailed_at, created_at, tickets(status)", { count: "exact" })
       .eq("event_id", eventId)
       .eq("is_test", false)
       .eq("is_complimentary", true)
       .order("created_at", { ascending: false })
       .range(page.from, page.to),
-    complimentaryTicketTotal(eventId),
+    complimentaryMetrics(eventId),
   ]);
   if (error) throw error;
+  const rows = (data ?? []) as ComplimentaryOrder[];
+  const issuers = [...new Set(rows.map((order) => order.issued_by).filter((id): id is string => Boolean(id)))];
+  const names = new Map<string, string>();
+  if (issuers.length) {
+    const { data: staff, error: staffError } = await admin.from("staff_roles").select("user_id, email").in("user_id", issuers);
+    if (staffError) throw staffError;
+    for (const person of staff ?? []) names.set(person.user_id, person.email);
+  }
   return {
-    entries: ((data ?? []) as ComplimentaryOrder[]).map((order) => ({
-      ref: orderRefFromId(order.id),
-      name: order.purchaser_name,
-      email: order.purchaser_email,
-      tier: order.tier_name,
-      tierId: order.tier_id,
-      tickets: order.quantity,
-      emailStatus: emailLabel(order.emailed_at),
-      createdAt: order.created_at,
-    })),
-    totalTickets,
+    entries: rows.map((order) => {
+      const tickets = order.tickets ?? [];
+      const used = tickets.filter((ticket) => ticket.status === "checked-in").length;
+      const remaining = tickets.filter((ticket) => ticket.status === "valid").length;
+      return {
+        ref: orderRefFromId(order.id),
+        name: order.purchaser_name,
+        email: order.purchaser_email,
+        issued: order.quantity,
+        used,
+        remaining,
+        status: complimentaryStatus(tickets),
+        emailStatus: emailLabel(order.emailed_at),
+        createdAt: order.created_at,
+        issuedBy: order.issued_by ? names.get(order.issued_by) ?? "Super admin" : null,
+      };
+    }),
+    ...metrics,
     page: page.page,
     pageSize: page.pageSize,
     total: count ?? 0,
   };
 }
 
-async function complimentaryTicketTotal(eventId: string): Promise<number> {
-  let total = 0;
+function complimentaryStatus(tickets: { status: string }[]): string {
+  const remaining = tickets.filter((ticket) => ticket.status === "valid").length;
+  const used = tickets.filter((ticket) => ticket.status === "checked-in").length;
+  if (tickets.length > 0 && remaining === 0 && used === 0) return "Cancelled";
+  if (remaining === 0) return "Fully used";
+  return "Active";
+}
+
+async function complimentaryMetrics(eventId: string): Promise<{ issued: number; admitted: number; remaining: number }> {
+  const metrics = { issued: 0, admitted: 0, remaining: 0 };
   for (let from = 0; from < 20000; from += 1000) {
     const { data, error } = await admin
-      .from("orders")
-      .select("quantity")
+      .from("tickets")
+      .select("status, orders!inner(is_test, is_complimentary)")
       .eq("event_id", eventId)
-      .eq("is_test", false)
-      .eq("is_complimentary", true)
+      .eq("orders.is_complimentary", true)
+      .eq("orders.is_test", false)
       .range(from, from + 999);
     if (error) throw error;
-    for (const row of data ?? []) total += Number(row.quantity) || 0;
+    for (const row of data ?? []) {
+      metrics.issued += 1;
+      if (row.status === "checked-in") metrics.admitted += 1;
+      if (row.status === "valid") metrics.remaining += 1;
+    }
     if (!data || data.length < 1000) break;
   }
-  return total;
+  return metrics;
+}
+
+async function complimentaryPreview(body: Record<string, unknown>) {
+  const eventId = textEvent(body);
+  const name = parseComplimentaryName(body.name);
+  const ticketCount = parseComplimentaryCount(body.ticketCount);
+  if (!eventId || !name || !ticketCount) return { error: "Enter a name and a ticket count from 1 to 10." };
+  const email = await renderComplimentaryPreview({ hostName: name, count: ticketCount }, eventId);
+  if (!email) return { error: "This event is not ready to preview." };
+  return { subject: email.subject, html: email.html };
 }
 
 async function issueComplimentary(actor: Actor, body: Record<string, unknown>, ip: string, ua: string) {
   const eventId = textEvent(body);
-  const tierId = parseTierId(body.tierId);
   const name = parseComplimentaryName(body.name);
   const email = parseStaffEmail(body.email);
+  const phone = parseVipPhone(body.phone);
   const ticketCount = parseComplimentaryCount(body.ticketCount);
   const idempotencyKey = parseIdempotencyKey(body.idempotencyKey);
-  if (!eventId || !tierId || !name || !email || !ticketCount || !idempotencyKey) {
-    return { error: "A valid event, ticket type, name, email, and ticket count are required." };
+  if (!eventId || !name || !email || phone == null || !ticketCount || !idempotencyKey) {
+    return { error: "A valid event, name, email, and ticket count from 1 to 10 are required." };
   }
-  if (!complimentaryPhraseOk(body.confirm)) return { error: "Type SEND to confirm." };
-
-  const tiers = (await loadTiers()).filter((tier) => tier.event_id === eventId);
-  const tier = tiers.find((item) => item.tier_id === tierId);
-  if (!tier) return { error: "Ticket type not found." };
 
   const { data, error } = await admin.rpc("issue_complimentary_tickets", {
     p_event_id: eventId,
-    p_tier_id: tierId,
     p_name: name,
     p_email: email,
+    p_phone: phone,
     p_ticket_count: ticketCount,
     p_idempotency_key: idempotencyKey,
+    p_issued_by: actor.id,
   });
   if (error) throw error;
   const row = (Array.isArray(data) ? data[0] : data) as { order_id: string | null; outcome: string } | null;
@@ -1158,12 +1194,11 @@ async function issueComplimentary(actor: Actor, body: Record<string, unknown>, i
     await audit(actor, "COMPLIMENTARY_PASSES_ISSUED", "order", row.order_id, {
       ref: orderRefFromId(row.order_id),
       email,
-      tier_id: tierId,
       ticket_count: ticketCount,
     }, ip, ua);
   }
 
-  const delivery = await deliverComplimentary(row.order_id, tier.metadata ?? {});
+  const delivery = await deliverComplimentary(row.order_id);
   if (delivery.error) {
     await audit(actor, "COMPLIMENTARY_EMAIL_FAILED", "order", row.order_id, {
       ref: orderRefFromId(row.order_id),
@@ -1187,10 +1222,8 @@ async function resendComplimentary(actor: Actor, body: Record<string, unknown>, 
   if (!eventId || !prefix) return { error: "Complimentary order not found." };
   const order = await loadComplimentaryOrder(eventId, prefix);
   if (!order) return { error: "Complimentary order not found." };
-  const tier = (await loadTiers()).find((item) => item.event_id === eventId && item.tier_id === order.tier_id);
-  if (!tier) return { error: "Ticket type not found." };
 
-  const delivery = await deliverComplimentary(order.id, tier.metadata ?? {});
+  const delivery = await deliverComplimentary(order.id);
   if (delivery.error) {
     await audit(actor, "COMPLIMENTARY_EMAIL_FAILED", "order", order.id, {
       ref: orderRefFromId(order.id),
@@ -1205,9 +1238,10 @@ async function resendComplimentary(actor: Actor, body: Record<string, unknown>, 
   return { ok: true, ref: orderRefFromId(order.id), emailStatus: "Sent", message: `Tickets were sent to ${order.purchaser_email}.` };
 }
 
-async function deliverComplimentary(orderId: string, metadata: Record<string, string>) {
+async function deliverComplimentary(orderId: string) {
   try {
-    const result = await sendOrderTicketEmail(orderId, metadata);
+    const result = await sendComplimentaryInvitation(orderId);
+    if (result === "not_sendable") return { result, error: "email_failed" };
     return { result, error: null };
   } catch (err) {
     console.error(JSON.stringify({
@@ -1224,7 +1258,7 @@ async function loadComplimentaryOrder(eventId: string, prefix: string): Promise<
   for (let from = 0; from < 20000; from += 1000) {
     const { data, error } = await admin
       .from("orders")
-      .select("id, event_id, tier_id, tier_name, quantity, purchaser_name, purchaser_email, emailed_at, created_at")
+      .select("id, event_id, tier_id, tier_name, quantity, purchaser_name, purchaser_email, issued_by, emailed_at, created_at, tickets(status)")
       .eq("event_id", eventId)
       .eq("is_test", false)
       .eq("is_complimentary", true)

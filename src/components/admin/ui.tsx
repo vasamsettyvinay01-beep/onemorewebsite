@@ -15,7 +15,8 @@ export function Chip({ children, tone = "neutral" }: { children: ReactNode; tone
 export function toneFor(status: string): "good" | "warn" | "bad" | "info" | "neutral" {
   const value = status.toLowerCase();
   if (value === "checked in" || value === "already used") return "info";
-  if (["paid", "valid", "sent", "on sale", "open", "none"].includes(value)) return "good";
+  if (["paid", "valid", "sent", "on sale", "open", "none", "active"].includes(value)) return "good";
+  if (value === "fully used") return "info";
   if (["refunded", "partial", "not sent", "sales paused", "paused"].includes(value)) return "warn";
   if (["cancelled", "disputed", "invalid", "sold out", "closed"].includes(value)) return "bad";
   return "neutral";

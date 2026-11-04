@@ -5,20 +5,26 @@ import { adminCall, AdminApiError } from "./admin-api";
 import { useAdmin } from "./AdminShell";
 import { Chip, Empty, ErrorNote, inputClass, Pager, quietButton, Stat, toneFor } from "./ui";
 
+const MAX_TICKETS = 10;
+
 interface ComplimentaryEntry {
   ref: string;
   name: string | null;
   email: string;
-  tier: string;
-  tierId: string;
-  tickets: number;
+  issued: number;
+  used: number;
+  remaining: number;
+  status: string;
   emailStatus: string;
   createdAt: string;
+  issuedBy: string | null;
 }
 
 interface ComplimentaryList {
   entries: ComplimentaryEntry[];
-  totalTickets: number;
+  issued: number;
+  admitted: number;
+  remaining: number;
   page: number;
   pageSize: number;
   total: number;
@@ -53,10 +59,11 @@ function ComplimentaryDesk() {
   const { eventId, event } = useAdmin();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
   const [ticketCount, setTicketCount] = useState(1);
-  const [tierId, setTierId] = useState(event?.tiers[0]?.id ?? "");
-  const [confirm, setConfirm] = useState("");
   const [idempotencyKey, setIdempotencyKey] = useState(newRequestKey);
+  const [preview, setPreview] = useState<string | null>(null);
+  const [previewing, setPreviewing] = useState(false);
   const [page, setPage] = useState(1);
   const [nonce, setNonce] = useState(0);
   const [loaded, setLoaded] = useState<{ key: string; body: ComplimentaryList | null; error: string | null } | null>(null);
@@ -65,6 +72,11 @@ function ComplimentaryDesk() {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const requestKey = `${eventId}|${page}|${nonce}`;
+
+  function edit(update: () => void) {
+    update();
+    setPreview(null);
+  }
 
   useEffect(() => {
     if (!eventId) return;
@@ -87,28 +99,42 @@ function ComplimentaryDesk() {
     };
   }, [eventId, page, requestKey]);
 
+  async function showPreview() {
+    if (!eventId) return;
+    setPreviewing(true);
+    setError(null);
+    try {
+      const body = await adminCall<{ html: string }>("complimentary_preview", { eventId, name, ticketCount });
+      setPreview(body.html);
+    } catch (err: unknown) {
+      setError(err instanceof AdminApiError ? err.message : "The preview could not be opened.");
+    } finally {
+      setPreviewing(false);
+    }
+  }
+
   async function send(e: FormEvent) {
     e.preventDefault();
-    if (!eventId || !tierId) return;
+    if (!eventId || !preview) return;
     setBusy(true);
     setError(null);
     setMessage(null);
     try {
       const body = await adminCall<SendResult>("issue_complimentary", {
         eventId,
-        tierId,
         name,
         email,
+        phone,
         ticketCount,
         idempotencyKey,
-        confirm,
       });
       setMessage(body.message);
       if (!body.ok) setError("The tickets exist, but delivery still needs attention.");
       setName("");
       setEmail("");
+      setPhone("");
       setTicketCount(1);
-      setConfirm("");
+      setPreview(null);
       setIdempotencyKey(newRequestKey());
       setPage(1);
       setNonce((value) => value + 1);
@@ -140,10 +166,10 @@ function ComplimentaryDesk() {
   if (!eventId || !event) return <Empty>Choose an event.</Empty>;
 
   return (
-    <div className="max-w-4xl">
+    <div className="max-w-5xl">
       <h1 className="text-xl font-semibold tracking-tight">Complimentary tickets</h1>
       <p className="mt-1 text-sm text-white/55">
-        Send individual QR tickets without a payment. These tickets do not affect public availability, sales, or revenue reporting.
+        Each ticket admits one guest and has its own QR. Complimentary admissions stay out of public ticket types, checkout, and revenue.
       </p>
 
       {error && <div className="mt-3"><ErrorNote>{error}</ErrorNote></div>}
@@ -153,56 +179,46 @@ function ComplimentaryDesk() {
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <label className="text-xs text-white/55">
             Recipient name
-            <input className={`${inputClass} mt-1`} value={name} onChange={(e) => setName(e.target.value)} maxLength={80} autoComplete="name" required />
+            <input className={`${inputClass} mt-1`} value={name} onChange={(e) => edit(() => setName(e.target.value))} maxLength={80} autoComplete="name" required />
           </label>
           <label className="text-xs text-white/55">
-            Recipient email
-            <input className={`${inputClass} mt-1`} type="email" value={email} onChange={(e) => setEmail(e.target.value)} maxLength={320} autoComplete="email" required />
+            Email
+            <input className={`${inputClass} mt-1`} type="email" value={email} onChange={(e) => edit(() => setEmail(e.target.value))} maxLength={320} autoComplete="email" required />
           </label>
           <label className="text-xs text-white/55">
-            Ticket type
-            <select className={`${inputClass} mt-1`} value={tierId} onChange={(e) => setTierId(e.target.value)} required>
-              {event.tiers.filter((tier) => tier.active).map((tier) => (
-                <option key={tier.id} value={tier.id}>{tier.name}</option>
-              ))}
-            </select>
+            Phone <span className="text-white/35">optional</span>
+            <input className={`${inputClass} mt-1`} value={phone} onChange={(e) => edit(() => setPhone(e.target.value))} maxLength={40} autoComplete="tel" />
           </label>
-          <label className="text-xs text-white/55">
-            Number of unique QR tickets
-            <input
-              className={`${inputClass} mt-1`}
-              type="number"
-              min={1}
-              max={50}
-              step={1}
-              value={ticketCount}
-              onChange={(e) => setTicketCount(Number(e.target.value))}
-              required
-            />
-          </label>
+          <div className="text-xs text-white/55">
+            Number of tickets
+            <div className="mt-1 flex h-9 items-center gap-2">
+              <button type="button" className={quietButton} onClick={() => edit(() => setTicketCount((count) => Math.max(1, count - 1)))} disabled={ticketCount <= 1} aria-label="Fewer tickets">−</button>
+              <span className="w-8 text-center text-sm font-semibold text-white">{ticketCount}</span>
+              <button type="button" className={quietButton} onClick={() => edit(() => setTicketCount((count) => Math.min(MAX_TICKETS, count + 1)))} disabled={ticketCount >= MAX_TICKETS} aria-label="More tickets">+</button>
+            </div>
+          </div>
         </div>
-        <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-          <input
-            className={inputClass}
-            value={confirm}
-            onChange={(e) => setConfirm(e.target.value)}
-            placeholder="Type SEND to confirm"
-            aria-label="Type SEND to confirm"
-            autoComplete="off"
-          />
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button type="button" className={quietButton} disabled={previewing || name.trim().length < 2} onClick={() => void showPreview()}>
+            {previewing ? "Opening preview…" : "Preview"}
+          </button>
           <button
-            className="h-9 shrink-0 rounded-md bg-[#eceae4] px-4 text-sm font-semibold text-[#141513] disabled:opacity-40"
+            className="h-9 rounded-md bg-[#eceae4] px-4 text-sm font-semibold text-[#141513] disabled:opacity-40"
             type="submit"
-            disabled={busy || confirm !== "SEND" || !tierId || ticketCount < 1 || ticketCount > 50}
+            disabled={busy || !preview}
           >
-            {busy ? "Creating and sending…" : `Send ${ticketCount} ticket${ticketCount === 1 ? "" : "s"}`}
+            {busy ? "Sending…" : `Send ${ticketCount} complimentary ticket${ticketCount === 1 ? "" : "s"}`}
           </button>
         </div>
+        {preview && (
+          <iframe title="Complimentary invitation preview" className="mt-3 h-[640px] w-full rounded-md border border-white/10 bg-black" sandbox="allow-same-origin" srcDoc={preview} />
+        )}
       </form>
 
-      <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <Stat label="Complimentary tickets issued" value={current?.body?.totalTickets ?? "—"} hint="Super-admin-only count" />
-        <Stat label="Recipients" value={current?.body?.total ?? "—"} hint={event.name} />
+      <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <Stat label="Complimentary issued" value={current?.body?.issued ?? "—"} hint="Not paid revenue" />
+        <Stat label="Complimentary admitted" value={current?.body?.admitted ?? "—"} hint={event.name} />
+        <Stat label="Complimentary remaining" value={current?.body?.remaining ?? "—"} hint="Still valid at the door" />
       </div>
 
       <h2 className="mt-6 text-sm font-semibold">Issuance history</h2>
@@ -211,27 +227,44 @@ function ComplimentaryDesk() {
       {current?.body && current.body.entries.length === 0 && <Empty>No complimentary tickets have been issued for this event.</Empty>}
       {current?.body && current.body.entries.length > 0 && (
         <>
-          <ul className="mt-2 divide-y divide-white/10 rounded-lg border border-white/10">
-            {current.body.entries.map((entry) => (
-              <li key={entry.ref} className="flex flex-col gap-2 px-3 py-3 text-sm sm:flex-row sm:items-center sm:justify-between">
-                <span className="min-w-0">
-                  <span className="flex flex-wrap items-center gap-2">
-                    <span className="font-medium">{entry.name || "Guest"}</span>
-                    <Chip tone={toneFor(entry.emailStatus)}>{entry.emailStatus}</Chip>
-                  </span>
-                  <span className="mt-0.5 block truncate text-white/55">{entry.email}</span>
-                  <span className="mt-0.5 block text-xs text-white/40">
-                    {entry.ref} · {entry.tier} · {entry.tickets} ticket{entry.tickets === 1 ? "" : "s"} · {new Date(entry.createdAt).toLocaleString()}
-                  </span>
-                </span>
-                {entry.emailStatus === "Not sent" && (
-                  <button type="button" className={quietButton} disabled={retrying !== null} onClick={() => void retry(entry)}>
-                    {retrying === entry.ref ? "Sending…" : "Retry email"}
-                  </button>
-                )}
-              </li>
-            ))}
-          </ul>
+          <div className="mt-2 overflow-x-auto rounded-lg border border-white/10">
+            <table className="w-full min-w-[760px] text-left text-sm">
+              <thead className="text-xs uppercase tracking-wide text-white/40">
+                <tr>
+                  <th className="px-3 py-2 font-medium">Recipient</th>
+                  <th className="px-3 py-2 font-medium">Email</th>
+                  <th className="px-3 py-2 font-medium">Issued</th>
+                  <th className="px-3 py-2 font-medium">Used</th>
+                  <th className="px-3 py-2 font-medium">Remaining</th>
+                  <th className="px-3 py-2 font-medium">Status</th>
+                  <th className="px-3 py-2 font-medium">Issued at</th>
+                  <th className="px-3 py-2 font-medium">Issued by</th>
+                  <th className="px-3 py-2 font-medium"></th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/10">
+                {current.body.entries.map((entry) => (
+                  <tr key={entry.ref}>
+                    <td className="px-3 py-2 font-medium">{entry.name || "Guest"}</td>
+                    <td className="px-3 py-2 text-white/70">{entry.email}</td>
+                    <td className="px-3 py-2">{entry.issued}</td>
+                    <td className="px-3 py-2">{entry.used}</td>
+                    <td className="px-3 py-2">{entry.remaining}</td>
+                    <td className="px-3 py-2"><Chip tone={toneFor(entry.status)}>{entry.status}</Chip></td>
+                    <td className="px-3 py-2 text-white/55">{new Date(entry.createdAt).toLocaleString()}</td>
+                    <td className="px-3 py-2 text-white/55">{entry.issuedBy ?? "—"}</td>
+                    <td className="px-3 py-2">
+                      {entry.emailStatus === "Not sent" && (
+                        <button type="button" className={quietButton} disabled={retrying !== null} onClick={() => void retry(entry)}>
+                          {retrying === entry.ref ? "Sending…" : "Retry email"}
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
           <Pager page={current.body.page} pageSize={current.body.pageSize} total={current.body.total} onPage={setPage} />
         </>
       )}

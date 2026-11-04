@@ -91,8 +91,9 @@ test("a super admin can refund a paid charge and an admin cannot until the event
   assert.equal(parseComplimentaryName("  Priya   O’Connor "), "Priya O’Connor");
   assert.equal(parseComplimentaryName("<script>"), null);
   assert.equal(parseComplimentaryCount(1), 1);
-  assert.equal(parseComplimentaryCount(50), 50);
-  assert.equal(parseComplimentaryCount(51), null);
+  assert.equal(parseComplimentaryCount(10), 10);
+  assert.equal(parseComplimentaryCount(11), null);
+  assert.equal(parseComplimentaryCount(50), null);
   assert.equal(parseIdempotencyKey("550e8400-e29b-41d4-a716-446655440000"), "550e8400-e29b-41d4-a716-446655440000");
   assert.equal(parseIdempotencyKey("short"), null);
   assert.equal(complimentaryPhraseOk("SEND"), true);

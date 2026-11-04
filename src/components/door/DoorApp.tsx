@@ -552,6 +552,7 @@ const VERDICTS = {
 function Verdict({ result, onDismiss }: { result: ScanResult | { outcome: "error" }; onDismiss: () => void }) {
   const v = VERDICTS[result.outcome];
   const r = result.outcome === "error" ? null : result;
+  const complimentary = r?.tier_name === "Complimentary Admission";
   const time = r?.checked_in_at
     ? new Date(r.checked_in_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
     : null;
@@ -562,13 +563,13 @@ function Verdict({ result, onDismiss }: { result: ScanResult | { outcome: "error
       onClick={onDismiss}
       className={cn("absolute inset-0 flex flex-col items-center justify-center px-6 text-center text-white", v.bg)}
     >
-      <span className="font-display text-7xl leading-none">{v.title}</span>
+      <span className="font-display text-7xl leading-none">{complimentary && result.outcome === "admitted" ? "Used" : v.title}</span>
       {r && r.outcome === "admitted" && (
         <span className="mt-5 text-lg font-semibold">
-          Check-in successful
+          {complimentary ? "Complimentary Admission" : "Check-in successful"}
           <span className="mt-1 block text-base font-normal">
-            {r.tier_name}
-            {r.guest_count && r.guest_count > 1 ? ` · guest ${r.guest_number} of ${r.guest_count}` : ""}
+            {complimentary ? "Admits 1 guest" : r.tier_name}
+            {!complimentary && r.guest_count && r.guest_count > 1 ? ` · guest ${r.guest_number} of ${r.guest_count}` : ""}
           </span>
         </span>
       )}
