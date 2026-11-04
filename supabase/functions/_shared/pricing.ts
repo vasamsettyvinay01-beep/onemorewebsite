@@ -22,12 +22,14 @@ type TaxClient = {
   };
 };
 
-/** Exclusive ticket tax for a server-priced line. Amounts are integer cents. */
+/**
+ * Exclusive ticket tax for a server-priced line. `lineCents` is the taxable
+ * ticket subtotal after any promo discount. Amounts are integer cents.
+ */
 export async function quoteTicketTotal(
   stripe: TaxClient,
   currency: string,
-  unitCents: number,
-  quantity: number,
+  lineCents: number,
   reference: string,
 ): Promise<{ tax: number; total: number; calculationId: string }> {
   const calculation = await stripe.tax.calculations.create({
@@ -35,7 +37,7 @@ export async function quoteTicketTotal(
     customer_details: { address: VENUE_ADDRESS, address_source: "billing" },
     line_items: [
       {
-        amount: unitCents * quantity,
+        amount: lineCents,
         reference,
         tax_behavior: "exclusive",
         tax_code: TICKET_TAX_CODE,

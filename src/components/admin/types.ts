@@ -43,6 +43,59 @@ export interface OrderRecord {
   refundStatus: string;
   emailStatus: string;
   createdAt: string;
+  promoCode: string | null;
+  promoLabel: string | null;
+  discountPercent: number | null;
+  originalSubtotal: number | null;
+  discount: number | null;
+}
+
+export interface PromoOrder {
+  ref: string;
+  purchaser: string | null;
+  email: string;
+  tier: string;
+  units: number;
+  admissions: number;
+  promoCode: string | null;
+  discountPercent: number | null;
+  originalSubtotal: number | null;
+  discount: number | null;
+  subtotal: number | null;
+  tax: number | null;
+  total: number;
+  currency: string;
+  paymentStatus: string;
+  refundStatus: string;
+  createdAt: string;
+}
+
+export interface PromoPerformance {
+  code: string;
+  discountType: string;
+  discountValue: number;
+  active: boolean;
+  startsAt: string | null;
+  expiresAt: string | null;
+  currency: string;
+  summary: {
+    orders: number;
+    currentOrders: number;
+    refundedOrders: number;
+    disputedOrders: number;
+    admissionsActive: number;
+    admissionsIssued: number;
+    originalValue: number;
+    discounts: number;
+    netSubtotal: number;
+    tax: number;
+    totalPaid: number;
+    grossSales: number;
+    refunds: number;
+    disputed: number;
+    netRevenue: number;
+  };
+  orders: PromoOrder[];
 }
 
 export interface Overview {
@@ -103,6 +156,7 @@ export interface AdminEvent {
   admissionsSold: number;
   passesIssued: number;
   tiers: { id: string; name: string; priceCents: number; admits: number; capacity: number | null; active: boolean }[];
+  promoCodes?: string[];
 }
 
 export interface TicketRecord {

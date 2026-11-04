@@ -1,5 +1,6 @@
 import { admin } from "./http.ts";
-import { readPartners, sendSaleNotification, sendTicketEmail } from "./email.ts";
+import { money, readPartners, sendSaleNotification, sendTicketEmail } from "./email.ts";
+import { promoLabel } from "./promo.mjs";
 
 export type OrderEmailMetadata = Record<string, string | undefined>;
 
@@ -15,7 +16,7 @@ export async function sendOrderTicketEmail(
 ): Promise<OrderEmailResult> {
   const { data: order, error: orderErr } = await admin
     .from("orders")
-    .select("status, access_token, emailed_at, purchaser_name, purchaser_email, tier_name, quantity, amount_total, currency, tickets(guest_number, token, status)")
+    .select("status, access_token, emailed_at, purchaser_name, purchaser_email, tier_name, quantity, amount_total, currency, promo_code, discount_percent, original_subtotal_cents, discount_amount_cents, tax_cents, tickets(guest_number, token, status)")
     .eq("id", orderId)
     .single();
   if (orderErr) throw orderErr;
@@ -38,6 +39,18 @@ export async function sendOrderTicketEmail(
   if (claim.error) throw claim.error;
   if (!claim.data?.length) return { status: "already_sent", ticketCount: tickets.length };
 
+  const label = promoLabel(order.promo_code, order.discount_percent);
+  const promoted = label && order.original_subtotal_cents != null && order.discount_amount_cents != null && order.tax_cents != null;
+  const receipt = promoted
+    ? {
+        promo: label,
+        originalSubtotal: money(order.original_subtotal_cents!, order.currency),
+        discount: `-${money(order.discount_amount_cents!, order.currency)}`,
+        tax: money(order.tax_cents!, order.currency),
+        total: money(order.amount_total, order.currency),
+      }
+    : undefined;
+
   try {
     await sendTicketEmail({
       to: order.purchaser_email,
@@ -58,6 +71,7 @@ export async function sendOrderTicketEmail(
       minimumAge: metadata.omc_min_age ? Number(metadata.omc_min_age) : undefined,
       accessToken: order.access_token,
       tickets,
+      receipt,
     });
     console.log(JSON.stringify({ msg: "email_sent", orderId, tickets: tickets.length }));
 
@@ -74,6 +88,9 @@ export async function sendOrderTicketEmail(
           guestCount: tickets.length,
           amountTotal: order.amount_total,
           currency: order.currency,
+          promo: promoted
+            ? { label, originalSubtotal: order.original_subtotal_cents!, discount: order.discount_amount_cents! }
+            : undefined,
         });
         console.log(JSON.stringify({ msg: "sale_notification_sent", orderId }));
       } catch (err) {

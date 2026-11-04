@@ -32,6 +32,7 @@ export const READ_ACTIONS = [
   "sales",
   "audit",
   "complimentary_list",
+  "promo_report",
 ];
 
 const PAYMENT_STATES = ["paid", "refunded", "partially-refunded", "disputed"];

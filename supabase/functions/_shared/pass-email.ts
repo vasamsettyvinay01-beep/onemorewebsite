@@ -29,6 +29,28 @@ export interface PassEmail {
   passes: { guest_number: number; token: string; qrSrc: string }[];
   /** Inbox the pass is sent to. Used for the greeting when no name was given. */
   to?: string;
+  /** Payment lines, shown under the passes only when a promo code was used. Preformatted money. */
+  receipt?: { promo: string; originalSubtotal: string; discount: string; tax: string; total: string };
+}
+
+function receiptBlock(receipt: PassEmail["receipt"]): string {
+  if (!receipt) return "";
+  const rows: [string, string][] = [
+    ["Promo", receipt.promo],
+    ["Original ticket subtotal", receipt.originalSubtotal],
+    ["Discount", receipt.discount],
+    ["Tax", receipt.tax],
+    ["Final total", receipt.total],
+  ];
+  const cells = rows
+    .map(
+      ([label, value], i) =>
+        `<tr><td style="padding:2px 0;font:400 10px/1.4 ${SANS};color:${C.muted}${i === rows.length - 1 ? `;border-top:1px solid ${C.hair};padding-top:4px` : ""}">${esc(label)}</td><td align="right" style="padding:2px 0;font:400 10px/1.4 ${SANS};color:${C.ivory}${i === rows.length - 1 ? `;border-top:1px solid ${C.hair};padding-top:4px` : ""}">${esc(value)}</td></tr>`,
+    )
+    .join("");
+  return `<tr><td bgcolor="${C.stock}" style="padding:4px 24px 2px;background:${C.stock}">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0">${cells}</table>
+    </td></tr>`;
 }
 
 const C = {
@@ -185,6 +207,7 @@ export function renderPassEmail(input: PassEmail): { subject: string; html: stri
     <tr><td align="center" bgcolor="${C.stock}" style="padding:8px 8px 4px;background:${C.stock}">
       <a href="${d.ticketsUrl}" style="display:inline-block;padding:12px 22px;background:${C.gold};color:${C.stock};text-decoration:none;${caps(11, C.stock, 0.18)}">View passes</a>
     </td></tr>
+    ${receiptBlock(d.receipt)}
     <tr><td align="center" bgcolor="${C.stock}" style="padding:4px 12px 8px;background:${C.stock};font:400 10px/1.45 ${SANS};color:${C.muted}">
       ${door}
       <div style="margin-top:6px">All ticket sales are final. Refunds are available only if the event is cancelled by The One More Company, subject to applicable law.</div>
@@ -208,6 +231,16 @@ export function renderPassEmail(input: PassEmail): { subject: string; html: stri
     ...(d.notice ? [d.notice, ""] : []),
     `View passes: ${d.ticketsUrl}`,
     "",
+    ...(d.receipt
+      ? [
+          `Promo: ${d.receipt.promo}`,
+          `Original ticket subtotal: ${d.receipt.originalSubtotal}`,
+          `Discount: ${d.receipt.discount}`,
+          `Tax: ${d.receipt.tax}`,
+          `Final total: ${d.receipt.total}`,
+          "",
+        ]
+      : []),
     "One pass per guest. Each pass is scanned once — keep them private.",
     "All ticket sales are final. Refunds are available only if the event is cancelled by The One More Company, subject to applicable law.",
     "Refund Policy: https://theonemorecompany.com/refunds",

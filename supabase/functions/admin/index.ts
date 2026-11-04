@@ -54,6 +54,7 @@ import {
   ticketRefFromId,
   zoneForVenue,
 } from "../_shared/admin-read.mjs";
+import { parsePromoFilter, promoLabel } from "../_shared/promo.mjs";
 
 // Canonical names live on the server. Cancellation must match this, not a name the browser sends.
 const EVENT_NAMES: Record<string, string> = {
@@ -93,6 +94,27 @@ interface OrderRow {
   status: string;
   emailed_at: string | null;
   created_at: string;
+  promo_code: string | null;
+  discount_percent: number | null;
+  original_subtotal_cents: number | null;
+  discount_amount_cents: number | null;
+  discounted_subtotal_cents: number | null;
+  tax_cents: number | null;
+}
+
+const ORDER_COLUMNS =
+  "id, event_id, tier_id, tier_name, quantity, purchaser_name, purchaser_email, amount_total, currency, status, emailed_at, created_at, promo_code, discount_percent, original_subtotal_cents, discount_amount_cents, discounted_subtotal_cents, tax_cents";
+
+// Orders fulfilled after promo codes shipped carry their own price snapshot.
+// Older orders are split from the catalog price, as before.
+function orderParts(
+  order: Pick<OrderRow, "amount_total" | "quantity" | "discounted_subtotal_cents" | "tax_cents">,
+  unitPrice: number | undefined,
+) {
+  if (order.discounted_subtotal_cents != null && order.tax_cents != null) {
+    return { subtotal: order.discounted_subtotal_cents, tax: order.tax_cents, total: order.amount_total };
+  }
+  return unitPrice == null ? null : splitCharge(order.amount_total, unitPrice, order.quantity);
 }
 
 Deno.serve(async (req) => {
@@ -163,6 +185,8 @@ Deno.serve(async (req) => {
         return asResult(req, await auditPage(actor, body));
       case "complimentary_list":
         return asResult(req, await complimentaryList(body));
+      case "promo_report":
+        return asResult(req, await promoReport(body));
       case "issue_complimentary":
         return asResult(req, await issueComplimentary(actor, body, ip, ua));
       case "resend_complimentary":
@@ -293,9 +317,9 @@ async function metrics(eventId: string) {
   const ops = await eventOps(eventId);
   const profile = eventProfile(tiers, ops?.status ?? null);
   const [orders, tickets, holds] = await Promise.all([
-    scanRows<Pick<OrderRow, "id" | "tier_id" | "quantity" | "amount_total" | "status" | "created_at">>(
+    scanRows<Pick<OrderRow, "id" | "tier_id" | "quantity" | "amount_total" | "currency" | "status" | "created_at" | "discounted_subtotal_cents" | "tax_cents">>(
       "orders",
-      "id, tier_id, quantity, amount_total, status, created_at",
+      "id, tier_id, quantity, amount_total, currency, status, created_at, discounted_subtotal_cents, tax_cents",
       eventId,
     ),
     scanRows<{ id: string; tier_id: string; status: string; order_id: string }>(
@@ -318,7 +342,7 @@ async function metrics(eventId: string) {
   for (const order of orders) {
     gross += order.amount_total;
     const tier = price.get(order.tier_id);
-    const parts = tier ? splitCharge(order.amount_total, tier.price_cents, order.quantity) : null;
+    const parts = orderParts(order, tier?.price_cents);
     if (!parts) split = false;
     else {
       subtotal += parts.subtotal;
@@ -424,7 +448,7 @@ async function overview(eventId: string) {
   if ("error" in summary) return summary;
   const { data, error } = await admin
     .from("orders")
-    .select("id, event_id, tier_id, tier_name, quantity, purchaser_name, purchaser_email, amount_total, currency, status, emailed_at, created_at")
+    .select(ORDER_COLUMNS)
     .eq("event_id", eventId)
     .eq("is_test", false)
     .eq("is_complimentary", false)
@@ -435,8 +459,31 @@ async function overview(eventId: string) {
   return { ...summary, recentOrders: recent };
 }
 
+interface PromotionRow {
+  id: string;
+  code: string;
+  event_id: string;
+  discount_type: string;
+  discount_value: number;
+  active: boolean;
+  starts_at: string | null;
+  expires_at: string | null;
+  created_at: string;
+}
+
+async function loadPromotions(eventId?: string): Promise<PromotionRow[]> {
+  let query = admin
+    .from("promotions")
+    .select("id, code, event_id, discount_type, discount_value, active, starts_at, expires_at, created_at")
+    .order("created_at");
+  if (eventId) query = query.eq("event_id", eventId);
+  const { data, error } = await query;
+  if (error) throw error;
+  return (data ?? []) as PromotionRow[];
+}
+
 async function events() {
-  const tiers = await loadTiers();
+  const [tiers, promotions] = await Promise.all([loadTiers(), loadPromotions()]);
   const ids = [...new Set(tiers.map((tier) => tier.event_id))];
   const list = [];
   for (const id of ids) {
@@ -467,9 +514,108 @@ async function events() {
         capacity: tier.capacity,
         active: tier.status !== "Inactive",
       })),
+      promoCodes: promotions.filter((promo) => promo.event_id === id).map((promo) => promo.code),
     });
   }
   return { events: list };
+}
+
+// Super admin promo attribution. Reads only the snapshot stored on each order,
+// never the current promotion settings, so history stays correct if a code changes.
+// "Current" figures leave out fully refunded and disputed orders; gross keeps every order.
+async function promoReport(body: Record<string, unknown>) {
+  const eventId = textEvent(body);
+  if (!eventId) return { error: "eventId required" };
+  const promotions = await loadPromotions(eventId);
+  const report = [];
+  for (const promotion of promotions) {
+    const orders: OrderRow[] = [];
+    for (let from = 0; from < 20000; from += 500) {
+      const { data, error } = await admin
+        .from("orders")
+        .select(ORDER_COLUMNS)
+        .eq("event_id", eventId)
+        .eq("promotion_id", promotion.id)
+        .eq("is_test", false)
+        .eq("is_complimentary", false)
+        .order("created_at", { ascending: false })
+        .range(from, from + 499);
+      if (error) throw error;
+      orders.push(...((data ?? []) as OrderRow[]));
+      if (!data || data.length < 500) break;
+    }
+    const counts = await admissionCounts(orders.map((order) => order.id));
+    const summary = {
+      orders: orders.length,
+      currentOrders: 0,
+      refundedOrders: 0,
+      disputedOrders: 0,
+      admissionsActive: 0,
+      admissionsIssued: 0,
+      originalValue: 0,
+      discounts: 0,
+      netSubtotal: 0,
+      tax: 0,
+      totalPaid: 0,
+      grossSales: 0,
+      refunds: 0,
+      disputed: 0,
+      netRevenue: 0,
+    };
+    for (const order of orders) {
+      const tickets = counts.get(order.id) ?? { issued: 0, active: 0 };
+      summary.admissionsIssued += tickets.issued;
+      summary.admissionsActive += tickets.active;
+      summary.grossSales += order.amount_total;
+      if (order.status === "refunded") {
+        summary.refundedOrders += 1;
+        summary.refunds += order.amount_total;
+        continue;
+      }
+      if (order.status === "disputed") {
+        summary.disputedOrders += 1;
+        summary.disputed += order.amount_total;
+        continue;
+      }
+      summary.currentOrders += 1;
+      summary.originalValue += order.original_subtotal_cents ?? 0;
+      summary.discounts += order.discount_amount_cents ?? 0;
+      summary.netSubtotal += order.discounted_subtotal_cents ?? 0;
+      summary.tax += order.tax_cents ?? 0;
+      summary.totalPaid += order.amount_total;
+    }
+    summary.netRevenue = summary.grossSales - summary.refunds - summary.disputed;
+    report.push({
+      code: promotion.code,
+      discountType: promotion.discount_type,
+      discountValue: promotion.discount_value,
+      active: promotion.active,
+      startsAt: promotion.starts_at,
+      expiresAt: promotion.expires_at,
+      currency: orders[0]?.currency ?? "usd",
+      summary,
+      orders: orders.map((order) => ({
+        ref: orderRefFromId(order.id),
+        purchaser: order.purchaser_name,
+        email: order.purchaser_email,
+        tier: order.tier_name,
+        units: order.quantity,
+        admissions: counts.get(order.id)?.issued ?? 0,
+        promoCode: order.promo_code,
+        discountPercent: order.discount_percent,
+        originalSubtotal: order.original_subtotal_cents,
+        discount: order.discount_amount_cents,
+        subtotal: order.discounted_subtotal_cents,
+        tax: order.tax_cents,
+        total: order.amount_total,
+        currency: order.currency,
+        paymentStatus: order.status,
+        refundStatus: refundLabel(order.status),
+        createdAt: order.created_at,
+      })),
+    });
+  }
+  return { promotions: report };
 }
 
 async function sales(eventId: string) {
@@ -498,21 +644,36 @@ function presentOrder(order: OrderRow, admissions: number, parts: { subtotal: nu
     refundStatus: refundLabel(order.status),
     emailStatus: emailLabel(order.emailed_at),
     createdAt: order.created_at,
+    promoCode: order.promo_code,
+    promoLabel: promoLabel(order.promo_code, order.discount_percent) || null,
+    discountPercent: order.discount_percent,
+    originalSubtotal: order.original_subtotal_cents ?? (parts && !order.promo_code ? parts.subtotal : null),
+    discount: order.discount_amount_cents ?? (parts && !order.promo_code ? 0 : null),
   };
 }
 
 async function presentOrders(orders: OrderRow[], tiers: { id: string; priceCents: number }[], eventName: string) {
   if (!orders.length) return [];
   const prices = new Map(tiers.map((tier) => [tier.id, tier.priceCents]));
-  const ids = orders.map((order) => order.id);
-  const { data, error } = await admin.from("tickets").select("order_id").in("order_id", ids);
-  if (error) throw error;
-  const counts = new Map<string, number>();
-  for (const ticket of data ?? []) counts.set(ticket.order_id, (counts.get(ticket.order_id) ?? 0) + 1);
-  return orders.map((order) => {
-    const unit = prices.get(order.tier_id);
-    return presentOrder(order, counts.get(order.id) ?? 0, unit == null ? null : splitCharge(order.amount_total, unit, order.quantity), eventName);
-  });
+  const counts = await admissionCounts(orders.map((order) => order.id));
+  return orders.map((order) =>
+    presentOrder(order, counts.get(order.id)?.issued ?? 0, orderParts(order, prices.get(order.tier_id)), eventName)
+  );
+}
+
+async function admissionCounts(orderIds: string[]) {
+  const counts = new Map<string, { issued: number; active: number }>();
+  for (let i = 0; i < orderIds.length; i += 200) {
+    const { data, error } = await admin.from("tickets").select("order_id, status").in("order_id", orderIds.slice(i, i + 200));
+    if (error) throw error;
+    for (const ticket of data ?? []) {
+      const entry = counts.get(ticket.order_id) ?? { issued: 0, active: 0 };
+      entry.issued += 1;
+      if (ticket.status !== "cancelled") entry.active += 1;
+      counts.set(ticket.order_id, entry);
+    }
+  }
+  return counts;
 }
 
 async function listOrders(body: Record<string, unknown>) {
@@ -525,7 +686,8 @@ async function listOrders(body: Record<string, unknown>) {
   const tierId = parseTierId(body.tierId);
   const fromDay = parseDay(body.from);
   const toDay = parseDay(body.to);
-  if (!page || query === null || payment === null || refund === null || tierId === null || fromDay === null || toDay === null) {
+  const promo = parsePromoFilter(body.promo);
+  if (!page || query === null || payment === null || refund === null || tierId === null || fromDay === null || toDay === null || promo === null) {
     return { error: "Bad filter" };
   }
   const tiers = (await loadTiers()).filter((tier) => tier.event_id === eventId);
@@ -536,7 +698,7 @@ async function listOrders(body: Record<string, unknown>) {
     if (ids.length !== 1) return { orders: [], page: 1, pageSize: page.pageSize, total: 0 };
     const { data, error } = await admin
       .from("orders")
-      .select("id, event_id, tier_id, tier_name, quantity, purchaser_name, purchaser_email, amount_total, currency, status, emailed_at, created_at")
+      .select(ORDER_COLUMNS)
       .eq("id", ids[0])
       .eq("event_id", eventId)
       .eq("is_test", false)
@@ -548,6 +710,9 @@ async function listOrders(body: Record<string, unknown>) {
     if (payment && order.status !== payment) return { orders: [], page: 1, pageSize: page.pageSize, total: 0 };
     if (!matchesRefund(order.status, refund)) return { orders: [], page: 1, pageSize: page.pageSize, total: 0 };
     if (tierId && order.tier_id !== tierId) return { orders: [], page: 1, pageSize: page.pageSize, total: 0 };
+    if (promo === "none" ? order.promo_code != null : promo && order.promo_code !== promo) {
+      return { orders: [], page: 1, pageSize: page.pageSize, total: 0 };
+    }
     const created = order.created_at.slice(0, 10);
     if (fromDay && created < fromDay) return { orders: [], page: 1, pageSize: page.pageSize, total: 0 };
     if (toDay && created > toDay) return { orders: [], page: 1, pageSize: page.pageSize, total: 0 };
@@ -556,7 +721,7 @@ async function listOrders(body: Record<string, unknown>) {
 
   let request = admin
     .from("orders")
-    .select("id, event_id, tier_id, tier_name, quantity, purchaser_name, purchaser_email, amount_total, currency, status, emailed_at, created_at", { count: "exact" })
+    .select(ORDER_COLUMNS, { count: "exact" })
     .eq("event_id", eventId)
     .eq("is_test", false)
     .eq("is_complimentary", false)
@@ -567,11 +732,13 @@ async function listOrders(body: Record<string, unknown>) {
   if (refund === "disputed") request = request.eq("status", "disputed");
   if (refund === "none") request = request.eq("status", "paid");
   if (tierId) request = request.eq("tier_id", tierId);
+  if (promo === "none") request = request.is("promo_code", null);
+  else if (promo) request = request.eq("promo_code", promo);
   if (fromDay) request = request.gte("created_at", `${fromDay}T00:00:00.000Z`);
   if (toDay) request = request.lte("created_at", `${toDay}T23:59:59.999Z`);
   if (query) {
     const pattern = likePattern(query);
-    request = request.or(`purchaser_name.ilike."${pattern}",purchaser_email.ilike."${pattern}"`);
+    request = request.or(`purchaser_name.ilike."${pattern}",purchaser_email.ilike."${pattern}",promo_code.ilike."${pattern}"`);
   }
   const { data, error, count } = await request.range(page.from, page.to);
   if (error) throw error;
@@ -592,7 +759,7 @@ async function orderDetail(body: Record<string, unknown>) {
   if (ids.length !== 1) return { error: "Order not found" };
   const { data, error } = await admin
     .from("orders")
-    .select("id, event_id, tier_id, tier_name, quantity, purchaser_name, purchaser_email, amount_total, currency, status, emailed_at, created_at")
+    .select(ORDER_COLUMNS)
     .eq("id", ids[0])
     .eq("event_id", eventId)
     .eq("is_test", false)

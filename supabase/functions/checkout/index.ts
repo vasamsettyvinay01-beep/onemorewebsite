@@ -1,14 +1,23 @@
 // Creates the PaymentIntent for the on-site checkout (/checkout).
-// POST { eventId, tierId, quantity, name, email, idempotencyKey } → { clientSecret, paymentIntentId }
-// POST { quote: true, eventId, tierId, quantity } → { subtotal, tax, total, currency }
+// POST { eventId, tierId, quantity, name, email, idempotencyKey, promoCode? } → { clientSecret, paymentIntentId }
+// POST { quote: true, eventId, tierId, quantity, promoCode? }
+//   → { subtotal, discount, discountedSubtotal, tax, total, currency, promo }
 // POST { release: true, idempotencyKey } → drops an unpaid hold
 //
-// Price, tax, guest count and capacity come from the database and Stripe Tax.
-// Nothing the browser sends can change what is charged.
+// Price, discount, tax, guest count and capacity come from the database and
+// Stripe Tax. The browser sends only the code it typed. Nothing it sends can
+// change what is charged.
 
 import Stripe from "npm:stripe@17";
 import { admin, corsHeaders, json } from "../_shared/http.ts";
 import { quoteTicketTotal } from "../_shared/pricing.ts";
+import { normalizePromoCode, priceTickets, PROMO_INVALID, promotionIsLive } from "../_shared/promo.mjs";
+
+interface LivePromotion {
+  id: string;
+  code: string;
+  percent: number;
+}
 
 const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY")!, { httpClient: Stripe.createFetchHttpClient() });
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -42,6 +51,7 @@ async function handle(req: Request): Promise<Response> {
   const name = String(body.name ?? "").trim().slice(0, 120);
   const email = String(body.email ?? "").trim().toLowerCase().slice(0, 200);
   const quote = body.quote === true;
+  const promoCode = normalizePromoCode(body.promoCode);
   if (!ID_RE.test(eventId) || !ID_RE.test(tierId)) return json(req, { error: "This pass isn't available." }, 404);
   const closed = await salesClosed(eventId);
   if (closed) return json(req, { error: closed }, 409);
@@ -93,16 +103,34 @@ async function handle(req: Request): Promise<Response> {
     return json(req, { error: "This pass isn't available right now." }, 409);
   }
 
+  let promo: LivePromotion | null = null;
+  if (promoCode !== "") {
+    if (!(await rateLimit(`promo:${ip}`, 20, 600))) return json(req, { error: "Please wait a moment and try again." }, 429);
+    promo = promoCode === null ? null : await findPromotion(eventId, promoCode);
+    if (!promo) return json(req, { error: PROMO_INVALID, code: "promo_invalid" }, 422);
+  }
+
   const unit = tier.price_cents as number;
   const currency = tier.currency as string;
+  const priced = priceTickets({ unitCents: unit, quantity, percent: promo?.percent ?? 0 });
   let quoted: { tax: number; total: number; calculationId: string };
   try {
-    quoted = await quoteTicketTotal(stripe, currency, unit, quantity, tierId);
+    quoted = await quoteTicketTotal(stripe, currency, priced.discountedSubtotal, tierId);
   } catch (err) {
     console.error(JSON.stringify({ msg: "tax_quote_failed", eventId, tierId, error: (err as Error).message?.slice(0, 200) }));
     return json(req, { error: "Something went wrong. Please try again." }, 500);
   }
-  if (quote) return json(req, { subtotal: unit * quantity, tax: quoted.tax, total: quoted.total, currency });
+  if (quote) {
+    return json(req, {
+      subtotal: priced.originalSubtotal,
+      discount: priced.discount,
+      discountedSubtotal: priced.discountedSubtotal,
+      tax: quoted.tax,
+      total: quoted.total,
+      currency,
+      promo: promo ? { code: promo.code, percent: promo.percent } : null,
+    });
+  }
 
   const idempotencyKey = typeof body.idempotencyKey === "string" && UUID_RE.test(body.idempotencyKey)
     ? body.idempotencyKey
@@ -117,8 +145,9 @@ async function handle(req: Request): Promise<Response> {
   if (reserved.error) return reserveError(req, reserved.error.message ?? "", tier.name);
 
   const hold = Array.isArray(reserved.data) ? reserved.data[0] : reserved.data;
+  const expected = { amount: quoted.total, promoCode: promo?.code ?? "" };
   if (hold?.already) {
-    const reused = await reuseIntent(req, idempotencyKey, hold.payment_intent_id);
+    const reused = await reuseIntent(req, idempotencyKey, hold.payment_intent_id, expected);
     if (reused) return reused;
   }
 
@@ -132,7 +161,7 @@ async function handle(req: Request): Promise<Response> {
         currency,
         payment_method_types: ["card"],
         receipt_email: email,
-        description: `${productName} × ${quantity}`,
+        description: `${productName} × ${quantity}${promo ? ` · ${promo.code} ${promo.percent}% off` : ""}`,
         statement_descriptor_suffix: "ONE MORE",
         metadata: {
           ...meta,
@@ -146,6 +175,13 @@ async function handle(req: Request): Promise<Response> {
           omc_email: email,
           omc_price_id: price?.id ?? "",
           omc_expected_total: String(quoted.total),
+          omc_promo_code: promo?.code ?? "",
+          omc_promotion_id: promo?.id ?? "",
+          omc_discount_percent: promo ? String(promo.percent) : "",
+          omc_original_subtotal: String(priced.originalSubtotal),
+          omc_discount_amount: String(priced.discount),
+          omc_discounted_subtotal: String(priced.discountedSubtotal),
+          omc_tax: String(quoted.tax),
         },
         hooks: { inputs: { tax: { calculation: quoted.calculationId } } },
         amount_details: {
@@ -155,6 +191,7 @@ async function handle(req: Request): Promise<Response> {
               product_code: tierId.replace(/[^a-z0-9]/gi, "").slice(0, 12),
               unit_cost: unit,
               quantity,
+              ...(priced.discount > 0 ? { discount_amount: priced.discount } : {}),
               tax: { total_tax_amount: quoted.tax },
             },
           ],
@@ -165,7 +202,7 @@ async function handle(req: Request): Promise<Response> {
   } catch (err) {
     const message = (err as Error).message ?? "";
     if (/idempoten/i.test(message)) {
-      const reused = await reuseIntent(req, idempotencyKey, null);
+      const reused = await reuseIntent(req, idempotencyKey, null, expected);
       if (reused) return reused;
     } else if (!hold?.already) {
       await admin.from("checkout_holds").delete().eq("idempotency_key", idempotencyKey).is("payment_intent_id", null);
@@ -181,11 +218,38 @@ async function handle(req: Request): Promise<Response> {
   if (attached.error) {
     console.error(JSON.stringify({ msg: "hold_attach_failed", paymentIntentId: intent.id }));
   }
-  console.log(JSON.stringify({ msg: "payment_intent", paymentIntentId: intent.id, eventId, tierId, quantity, amount: intent.amount, currency }));
+  console.log(JSON.stringify({
+    msg: "payment_intent",
+    paymentIntentId: intent.id,
+    eventId,
+    tierId,
+    quantity,
+    amount: intent.amount,
+    currency,
+    promoCode: promo?.code ?? null,
+    discount: priced.discount,
+  }));
   return json(req, { clientSecret: intent.client_secret, paymentIntentId: intent.id });
 }
 
-async function reuseIntent(req: Request, idempotencyKey: string, knownId: string | null): Promise<Response | null> {
+async function findPromotion(eventId: string, code: string): Promise<LivePromotion | null> {
+  const { data, error } = await admin
+    .from("promotions")
+    .select("id, code, event_id, discount_type, discount_value, active, starts_at, expires_at")
+    .eq("event_id", eventId)
+    .eq("code", code)
+    .maybeSingle();
+  if (error) throw error;
+  if (!promotionIsLive(data, eventId)) return null;
+  return { id: data!.id, code: data!.code, percent: data!.discount_value };
+}
+
+async function reuseIntent(
+  req: Request,
+  idempotencyKey: string,
+  knownId: string | null,
+  expected: { amount: number; promoCode: string },
+): Promise<Response | null> {
   let paymentIntentId = knownId;
   for (let attempt = 0; !paymentIntentId && attempt < 10; attempt++) {
     await new Promise((resolve) => setTimeout(resolve, 200));
@@ -195,6 +259,9 @@ async function reuseIntent(req: Request, idempotencyKey: string, knownId: string
   if (!paymentIntentId) return null;
   const existing = await stripe.paymentIntents.retrieve(paymentIntentId);
   if (!existing.client_secret || existing.status === "canceled") return null;
+  if (existing.amount !== expected.amount || (existing.metadata?.omc_promo_code ?? "") !== expected.promoCode) {
+    return json(req, { error: "Your booking changed. Please try again." }, 409);
+  }
   return json(req, { clientSecret: existing.client_secret, paymentIntentId: existing.id });
 }
 

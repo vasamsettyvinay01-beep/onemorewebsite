@@ -17,6 +17,32 @@ import type { OneMoreEvent, TicketTier } from "@/types/event";
 
 const stripePromise = backend.stripeKey ? loadStripe(backend.stripeKey) : null;
 
+const PROMO_INVALID = "PROMO CODE NOT VALID";
+
+interface Quote {
+  key: string;
+  subtotal: number;
+  discount: number;
+  discountedSubtotal: number;
+  tax: number;
+  total: number;
+  promo: { code: string; percent: number } | null;
+}
+
+function readQuote(key: string, body: Record<string, unknown>): Quote | null {
+  if (typeof body.total !== "number" || typeof body.tax !== "number" || typeof body.subtotal !== "number") return null;
+  const promo = body.promo as { code?: unknown; percent?: unknown } | null | undefined;
+  return {
+    key,
+    subtotal: body.subtotal,
+    discount: typeof body.discount === "number" ? body.discount : 0,
+    discountedSubtotal: typeof body.discountedSubtotal === "number" ? body.discountedSubtotal : body.subtotal,
+    tax: body.tax,
+    total: body.total,
+    promo: promo && typeof promo.code === "string" && typeof promo.percent === "number" ? { code: promo.code, percent: promo.percent } : null,
+  };
+}
+
 const GOLD = "#BB9B63";
 const IVORY = "#ECEAE4";
 const RICH = "#0F100F";
@@ -166,32 +192,43 @@ function CheckoutCard({ event, initialTier }: { event: OneMoreEvent; initialTier
   const idempotencyKey = useRef<string | null>(null);
   const attempt = useRef("");
 
-  const [quote, setQuote] = useState<{ key: string; tax: number; total: number } | null>(null);
+  const [quote, setQuote] = useState<Quote | null>(null);
+  const [promoDraft, setPromoDraft] = useState("");
+  const [promoCode, setPromoCode] = useState<string | null>(null);
+  const [promoError, setPromoError] = useState<string | null>(null);
+  const [promoBusy, setPromoBusy] = useState(false);
 
   const maxQty = Math.min(tier?.maxPerOrder ?? 10, 10);
   const qty = Math.min(quantity, maxQty);
   const subtotal = (tier?.priceCents ?? 0) * qty;
-  const quoteKey = `${tier?.id}:${qty}`;
+  const quoteKey = `${tier?.id}:${qty}:${promoCode ?? ""}`;
   const priced = quote?.key === quoteKey ? quote : null;
   const total = priced?.total ?? subtotal;
 
   useEffect(() => {
-    if (!tier) return;
+    if (!tier || quote?.key === quoteKey) return;
     let stale = false;
     fetch(functionUrl("checkout"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ eventId: event.id, tierId: tier.id, quantity: qty, quote: true }),
+      body: JSON.stringify({ eventId: event.id, tierId: tier.id, quantity: qty, quote: true, ...(promoCode ? { promoCode } : {}) }),
     })
-      .then((res) => (res.ok ? res.json() : null))
-      .then((body) => {
-        if (!stale && body && typeof body.total === "number") setQuote({ key: quoteKey, tax: body.tax, total: body.total });
+      .then(async (res) => {
+        const body = await res.json().catch(() => null);
+        if (stale) return;
+        if (res.status === 422 && body?.code === "promo_invalid") {
+          setPromoCode(null);
+          setPromoError(PROMO_INVALID);
+          return;
+        }
+        const next = res.ok && body ? readQuote(quoteKey, body) : null;
+        if (next) setQuote(next);
       })
       .catch(() => {});
     return () => {
       stale = true;
     };
-  }, [event.id, tier, qty, quoteKey]);
+  }, [event.id, tier, qty, quoteKey, promoCode, quote?.key]);
 
   useEffect(() => {
     if (total > 0) elements?.update({ amount: total });
@@ -203,8 +240,48 @@ function CheckoutCard({ event, initialTier }: { event: OneMoreEvent; initialTier
   const totalLabel = formatMoney(total, tier.currency);
   const valid = name.trim().length > 1 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
 
+  async function applyPromo() {
+    const entered = promoDraft.trim();
+    if (!entered || promoBusy || busy) {
+      if (!entered) setPromoError(PROMO_INVALID);
+      return;
+    }
+    setPromoBusy(true);
+    setPromoError(null);
+    try {
+      const res = await fetch(functionUrl("checkout"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ eventId: event.id, tierId: tier!.id, quantity: qty, quote: true, promoCode: entered }),
+      });
+      const body = await res.json().catch(() => ({}));
+      const applied = res.ok && body?.promo?.code ? String(body.promo.code) : null;
+      const next = applied ? readQuote(`${tier!.id}:${qty}:${applied}`, body) : null;
+      if (applied && next) {
+        setQuote(next);
+        setPromoCode(applied);
+        setPromoDraft(applied);
+      } else if (res.status === 422 || res.ok) {
+        setPromoError(PROMO_INVALID);
+      } else {
+        setPromoError(body?.error ?? "Something went wrong. Please try again.");
+      }
+    } catch {
+      setPromoError("Something went wrong. Please try again.");
+    } finally {
+      setPromoBusy(false);
+    }
+  }
+
+  function removePromo() {
+    if (busy) return;
+    setPromoCode(null);
+    setPromoDraft("");
+    setPromoError(null);
+  }
+
   function paymentKey(buyerEmail: string) {
-    const next = `${tier!.id}:${qty}:${buyerEmail.trim().toLowerCase()}`;
+    const next = `${tier!.id}:${qty}:${promoCode ?? ""}:${buyerEmail.trim().toLowerCase()}`;
     if (attempt.current !== next || !idempotencyKey.current) {
       attempt.current = next;
       idempotencyKey.current = crypto.randomUUID();
@@ -229,10 +306,15 @@ function CheckoutCard({ event, initialTier }: { event: OneMoreEvent; initialTier
         tierId: tier!.id,
         quantity: qty,
         idempotencyKey: paymentKey(buyer.email),
+        ...(promoCode ? { promoCode } : {}),
         ...buyer,
       }),
     });
     const body = await res.json().catch(() => ({}));
+    if (body.code === "promo_invalid") {
+      setPromoCode(null);
+      setPromoError(PROMO_INVALID);
+    }
     if (!res.ok || !body.clientSecret) throw new Error(body.error ?? "Something went wrong. Please try again.");
     return body as { clientSecret: string; paymentIntentId: string };
   }
@@ -297,8 +379,11 @@ function CheckoutCard({ event, initialTier }: { event: OneMoreEvent; initialTier
     e.resolve({
       emailRequired: true,
       lineItems: [
-        { name: `${event.name} · ${tier!.name} × ${qty}`, amount: subtotal },
-        ...(priced ? [{ name: "Sales tax", amount: priced.tax }] : []),
+        {
+          name: `${event.name} · ${tier!.name} × ${qty}${priced.promo ? ` (${priced.promo.code} −${priced.promo.percent}%)` : ""}`,
+          amount: priced.discountedSubtotal,
+        },
+        { name: "Sales tax", amount: priced.tax },
       ],
     });
   }
@@ -421,10 +506,91 @@ function CheckoutCard({ event, initialTier }: { event: OneMoreEvent; initialTier
               </div>
             </div>
 
-            <p className="mt-2 flex items-center justify-between text-[0.72rem] text-ivory/50">
+            <div className="mt-3 border-t border-ivory/10 pt-3">
+              {promoCode ? (
+                <div className="flex items-center justify-between gap-3">
+                  <span aria-live="polite">
+                    <span className="block text-[0.68rem] font-semibold uppercase tracking-[0.16em] text-gold">{promoCode} applied ✓</span>
+                    <span className="mt-0.5 block text-[0.62rem] uppercase tracking-[0.16em] text-ivory/50">
+                      {priced?.promo ? `${priced.promo.percent}% off` : "Updating…"}
+                    </span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={removePromo}
+                    disabled={busy}
+                    className="text-[0.6rem] font-semibold uppercase tracking-[0.18em] text-ivory/55 underline-offset-4 transition-colors hover:text-ivory hover:underline disabled:opacity-40"
+                  >
+                    Remove
+                  </button>
+                </div>
+              ) : (
+                <div>
+                  <label htmlFor="promo-code" className={label}>Promo code</label>
+                  <div className="flex gap-2">
+                    <input
+                      id="promo-code"
+                      className={cn(field, "uppercase placeholder:normal-case")}
+                      value={promoDraft}
+                      onChange={(e) => {
+                        setPromoDraft(e.target.value);
+                        if (promoError) setPromoError(null);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          void applyPromo();
+                        }
+                      }}
+                      placeholder="Enter promo code"
+                      autoComplete="off"
+                      autoCapitalize="characters"
+                      spellCheck={false}
+                      maxLength={40}
+                      disabled={busy || promoBusy}
+                      aria-invalid={!!promoError}
+                      aria-describedby={promoError ? "promo-error" : undefined}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => void applyPromo()}
+                      disabled={busy || promoBusy || !promoDraft.trim()}
+                      className="h-10 shrink-0 rounded-[2px] border border-gold/70 px-4 text-[0.62rem] font-semibold uppercase tracking-[0.18em] text-gold transition-colors hover:bg-gold hover:text-rich disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-gold"
+                    >
+                      {promoBusy ? "…" : "Apply"}
+                    </button>
+                  </div>
+                  {promoError && (
+                    <p id="promo-error" role="alert" className="mt-1.5 text-[0.62rem] font-semibold uppercase tracking-[0.16em] text-[#E7A598]">
+                      {promoError}
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {priced?.promo && (
+              <>
+                <p className="mt-2 flex items-center justify-between text-[0.72rem] text-ivory/50">
+                  <span className="eyebrow text-ivory/45">Ticket subtotal</span>
+                  <span>{formatMoney(priced.subtotal, tier.currency)}</span>
+                </p>
+                <p className="mt-1 flex items-center justify-between text-[0.72rem] text-gold">
+                  <span className="eyebrow">{priced.promo.code} — {priced.promo.percent}% off</span>
+                  <span>−{formatMoney(priced.discount, tier.currency)}</span>
+                </p>
+              </>
+            )}
+            <p className={cn("flex items-center justify-between text-[0.72rem] text-ivory/50", priced?.promo ? "mt-1" : "mt-2")}>
               <span className="eyebrow text-ivory/45">Sales tax</span>
               <span>{priced ? formatMoney(priced.tax, tier.currency) : "Calculating…"}</span>
             </p>
+            {priced?.promo && (
+              <p className="mt-2 flex items-center justify-between border-t border-ivory/10 pt-2 text-[0.8rem] text-ivory">
+                <span className="eyebrow text-ivory/70">Total</span>
+                <span className="font-display text-[1.25rem] leading-none">{formatMoney(priced.total, tier.currency)}</span>
+              </p>
+            )}
           </div>
 
           <div className={cn(!locked && "lg:border-l lg:border-ivory/10 lg:pl-10")}>

@@ -1,11 +1,12 @@
 // Stripe → passes. Signature is required. Fulfilment is idempotent on the
-// payment intent, and the charged amount is checked against the tier price
-// and a fresh tax quote before any ticket is created.
+// payment intent, and the charged amount is checked against the tier price,
+// any promo recorded by checkout, and a fresh tax quote before any ticket is created.
 
 import Stripe from "npm:stripe@17";
 import { admin } from "../_shared/http.ts";
 import { sendOrderTicketEmail } from "../_shared/order-email.ts";
 import { quoteTicketTotal } from "../_shared/pricing.ts";
+import { normalizePromoCode, priceTickets } from "../_shared/promo.mjs";
 
 const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY")!, { httpClient: Stripe.createFetchHttpClient() });
 const cryptoProvider = Stripe.createSubtleCryptoProvider();
@@ -109,13 +110,19 @@ async function fulfil(paymentIntentId: string, sessionId?: string) {
   if (tierErr) throw tierErr;
   if (!tier) throw new Error("Unknown pass");
 
+  const promo = await promoFromIntent(meta);
+  if (promo === "invalid") {
+    await refundAndStop(paymentIntentId, "promo_mismatch");
+    return;
+  }
+
   const amount = pi.amount_received || 0;
-  const subtotal = tier.price_cents * quantity;
-  if (pi.currency !== tier.currency || amount < subtotal || amount !== pi.amount) {
+  const priced = priceTickets({ unitCents: tier.price_cents, quantity, percent: promo?.percent ?? 0 });
+  if (pi.currency !== tier.currency || amount < priced.discountedSubtotal || amount !== pi.amount) {
     await refundAndStop(paymentIntentId, "amount_mismatch");
     return;
   }
-  const quoted = await quoteTicketTotal(stripe, tier.currency, tier.price_cents, quantity, meta.omc_tier_id);
+  const quoted = await quoteTicketTotal(stripe, tier.currency, priced.discountedSubtotal, meta.omc_tier_id);
   if (amount < quoted.total) {
     await refundAndStop(paymentIntentId, "tax_mismatch");
     return;
@@ -133,16 +140,50 @@ async function fulfil(paymentIntentId: string, sessionId?: string) {
     p_email: email,
     p_amount_total: amount,
     p_currency: pi.currency,
+    ...(promo
+      ? { p_promotion_id: promo.id, p_promo_code: promo.code, p_discount_percent: promo.percent }
+      : {}),
   });
   if (error) throw error;
   const row = (Array.isArray(data) ? data[0] : data) as { order_id: string | null; outcome: string };
-  console.log(JSON.stringify({ msg: "fulfil", paymentIntentId, outcome: row?.outcome, orderId: row?.order_id }));
+  console.log(JSON.stringify({
+    msg: "fulfil",
+    paymentIntentId,
+    outcome: row?.outcome,
+    orderId: row?.order_id,
+    promoCode: promo?.code ?? null,
+    discount: priced.discount,
+  }));
   if (!row || row.outcome === "oversold" || row.outcome === "underpaid" || row.outcome === "rejected") {
     await refundAndStop(paymentIntentId, row?.outcome ?? "rejected");
     return;
   }
   if (!row.order_id) return;
   await sendOrderTicketEmail(row.order_id, meta, paymentIntentId);
+}
+
+// Checkout writes the promo into PaymentIntent metadata with the secret key, so
+// the browser cannot set it. It is still checked against the promotions row.
+// The percent is the snapshot the customer was charged, so a promotion disabled
+// after payment does not reject a payment that already succeeded.
+async function promoFromIntent(
+  meta: Record<string, string>,
+): Promise<{ id: string; code: string; percent: number } | null | "invalid"> {
+  const raw = meta.omc_promo_code ?? "";
+  if (!raw && !meta.omc_promotion_id && !meta.omc_discount_percent) return null;
+  const code = normalizePromoCode(raw);
+  const percent = Number(meta.omc_discount_percent);
+  const id = meta.omc_promotion_id ?? "";
+  if (!code || code !== raw || !Number.isInteger(percent) || percent < 1 || percent > 100) return "invalid";
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) return "invalid";
+  const { data, error } = await admin
+    .from("promotions")
+    .select("id, code, event_id, discount_type")
+    .eq("id", id)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data || data.code !== code || data.event_id !== meta.omc_event_id || data.discount_type !== "percentage") return "invalid";
+  return { id: data.id, code: data.code, percent };
 }
 
 async function refundAndStop(paymentIntentId: string, reason: string) {

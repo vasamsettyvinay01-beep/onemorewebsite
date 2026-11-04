@@ -14,21 +14,34 @@ export function OrdersPanel() {
   const params = useSearchParams();
   const ref = params.get("ref");
   if (ref) return <OrderDetailView eventId={eventId} refCode={ref} />;
-  return <OrderTable eventId={eventId} eventName={event?.name ?? "Event"} tiers={event?.tiers ?? []} />;
+  return (
+    <OrderTable
+      eventId={eventId}
+      eventName={event?.name ?? "Event"}
+      tiers={event?.tiers ?? []}
+      promoCodes={event?.promoCodes ?? []}
+      initialPromo={params.get("promo") ?? ""}
+    />
+  );
 }
 
 function OrderTable({
   eventId,
   eventName,
   tiers,
+  promoCodes,
+  initialPromo,
 }: {
   eventId: string;
   eventName: string;
   tiers: { id: string; name: string }[];
+  promoCodes: string[];
+  initialPromo: string;
 }) {
   const [draft, setDraft] = useState("");
   const [q, setQ] = useState("");
   const [tierId, setTierId] = useState("");
+  const [promo, setPromo] = useState(initialPromo === "none" || promoCodes.includes(initialPromo) ? initialPromo : "");
   const [paymentStatus, setPaymentStatus] = useState("");
   const [refundStatus, setRefundStatus] = useState("");
   const [from, setFrom] = useState("");
@@ -41,7 +54,7 @@ function OrderTable({
     setPageEvent(eventId);
     setPage(1);
   }
-  const requestKey = [eventId, q, tierId, paymentStatus, refundStatus, from, to, page, nonce].join("|");
+  const requestKey = [eventId, q, tierId, promo, paymentStatus, refundStatus, from, to, page, nonce].join("|");
 
   useEffect(() => {
     if (!eventId) return;
@@ -50,6 +63,7 @@ function OrderTable({
       eventId,
       q,
       tierId,
+      promo,
       paymentStatus,
       refundStatus,
       from,
@@ -66,7 +80,7 @@ function OrderTable({
     return () => {
       cancel = true;
     };
-  }, [eventId, q, tierId, paymentStatus, refundStatus, from, to, page, nonce, requestKey]);
+  }, [eventId, q, tierId, promo, paymentStatus, refundStatus, from, to, page, nonce, requestKey]);
 
   function search(e: FormEvent) {
     e.preventDefault();
@@ -86,13 +100,20 @@ function OrderTable({
   return (
     <div>
       <h1 className="text-xl font-semibold tracking-tight">Orders</h1>
-      <p className="mt-1 text-sm text-white/50">{eventName}. Search by name, email, or order reference. Dates are UTC.</p>
+      <p className="mt-1 text-sm text-white/50">{eventName}. Search by name, email, promo code, or order reference. Dates are UTC.</p>
       <form onSubmit={search} className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
-        <input className={inputClass} value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="Name, email, or OMC- reference" aria-label="Search orders" />
+        <input className={inputClass} value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="Name, email, promo, or OMC- reference" aria-label="Search orders" />
         <select className={inputClass} value={tierId} onChange={(e) => { setTierId(e.target.value); setPage(1); }} aria-label="Tier">
           <option value="">All tiers</option>
           {tiers.map((tier) => (
             <option key={tier.id} value={tier.id}>{tier.name}</option>
+          ))}
+        </select>
+        <select className={inputClass} value={promo} onChange={(e) => { setPromo(e.target.value); setPage(1); }} aria-label="Promo code">
+          <option value="">All promo codes</option>
+          <option value="none">No promo</option>
+          {promoCodes.map((code) => (
+            <option key={code} value={code}>{code}</option>
           ))}
         </select>
         <select className={inputClass} value={paymentStatus} onChange={(e) => { setPaymentStatus(e.target.value); setPage(1); }} aria-label="Payment state">
@@ -128,15 +149,16 @@ function OrderTable({
             <p className="mt-1">{order.purchaser || "Guest"}</p>
             <p className="truncate text-white/50">{order.email}</p>
             <p className="mt-2 text-white/70">{order.tier} · {order.units} units · {order.admissions} admissions</p>
+            {order.promoLabel && <p className="mt-1 text-white/60">{order.promoLabel} · −{money(order.discount, order.currency)}</p>}
             <p className="mt-1 tabular-nums">{money(order.total, order.currency)}</p>
           </Link>
         ))}
       </div>
       <div className="mt-3 hidden overflow-x-auto md:block">
-        <table className="w-full min-w-[68rem] text-left text-sm">
+        <table className="w-full min-w-[76rem] text-left text-sm">
           <thead className="text-[0.65rem] uppercase tracking-wide text-white/40">
             <tr>
-              {["Order", "Purchaser", "Email", "Event", "Tier", "Units", "Admissions", "Subtotal", "Tax", "Total", "Status", "Refund", "Created"].map((label) => (
+              {["Order", "Purchaser", "Email", "Event", "Tier", "Units", "Admissions", "Promo", "Discount", "Subtotal", "Tax", "Total", "Status", "Refund", "Created"].map((label) => (
                 <th key={label} className="py-2 pr-3 font-medium">{label}</th>
               ))}
             </tr>
@@ -151,6 +173,8 @@ function OrderTable({
                 <td className="py-2 pr-3">{order.tier}</td>
                 <td className="py-2 pr-3 tabular-nums">{order.units}</td>
                 <td className="py-2 pr-3 tabular-nums">{order.admissions}</td>
+                <td className="py-2 pr-3">{order.promoCode ?? <span className="text-white/35">—</span>}</td>
+                <td className="py-2 pr-3 tabular-nums">{order.promoCode ? `−${money(order.discount, order.currency)}` : <span className="text-white/35">—</span>}</td>
                 <td className="py-2 pr-3 tabular-nums">{money(order.subtotal, order.currency)}</td>
                 <td className="py-2 pr-3 tabular-nums">{money(order.tax, order.currency)}</td>
                 <td className="py-2 pr-3 tabular-nums">{money(order.total, order.currency)}</td>
@@ -210,7 +234,14 @@ function OrderDetailView({ eventId, refCode }: { eventId: string; refCode: strin
             <Item label="Tier" value={detail.order.tier} />
             <Item label="Quantity" value={String(detail.order.units)} />
             <Item label="Admissions" value={String(detail.order.admissions)} />
-            <Item label="Subtotal" value={money(detail.order.subtotal, detail.order.currency)} />
+            {detail.order.promoLabel && (
+              <>
+                <Item label="Promo code" value={detail.order.promoLabel} />
+                <Item label="Original subtotal" value={money(detail.order.originalSubtotal, detail.order.currency)} />
+                <Item label="Discount" value={`−${money(detail.order.discount, detail.order.currency)}`} />
+              </>
+            )}
+            <Item label={detail.order.promoLabel ? "Subtotal after discount" : "Subtotal"} value={money(detail.order.subtotal, detail.order.currency)} />
             <Item label="Tax" value={money(detail.order.tax, detail.order.currency)} />
             <Item label="Total" value={money(detail.order.total, detail.order.currency)} />
             <Item label="Payment" value={detail.order.paymentStatus} />

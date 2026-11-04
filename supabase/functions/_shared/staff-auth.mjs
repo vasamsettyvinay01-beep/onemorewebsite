@@ -30,6 +30,7 @@ export const PERMISSIONS = {
   staff_list: ["super_admin"],
   staff_set: ["super_admin"],
   complimentary_list: ["super_admin"],
+  promo_report: ["super_admin"],
   issue_complimentary: ["super_admin"],
   resend_complimentary: ["super_admin"],
   scan: ["super_admin", "admin", "door_staff"],
@@ -125,6 +126,7 @@ const READ_LIMITS = new Set([
   "sales",
   "audit",
   "complimentary_list",
+  "promo_report",
 ]);
 
 export function rateLimitFor(action) {

@@ -39,13 +39,14 @@ export interface SaleNotification {
   guestCount: number;
   amountTotal: number;
   currency: string;
+  promo?: { label: string; originalSubtotal: number; discount: number };
 }
 
 const BRAND_ASSETS = `${Deno.env.get("SUPABASE_URL")}/storage/v1/object/public/brand`;
 const esc = (value: string) =>
   value.replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]!);
 
-function money(cents: number, currency: string): string {
+export function money(cents: number, currency: string): string {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: currency.toUpperCase(),
@@ -144,6 +145,13 @@ export async function sendSaleNotification(sale: SaleNotification): Promise<void
     ["Pass", sale.tierName],
     ["Quantity", String(sale.quantity)],
     ["Guests admitted", String(sale.guestCount)],
+    ...(sale.promo
+      ? [
+          ["Promo", sale.promo.label],
+          ["Original subtotal", money(sale.promo.originalSubtotal, sale.currency)],
+          ["Discount", `-${money(sale.promo.discount, sale.currency)}`],
+        ]
+      : []),
     ["Paid", total],
     ["Order", sale.orderId],
     ["Payment", sale.paymentIntentId],
