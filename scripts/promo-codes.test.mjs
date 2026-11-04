@@ -225,6 +225,12 @@ test("the customer sees the promo, and only promo orders get a receipt block", (
   assert.match(passEmail, /if \(!receipt\) return "";/);
 });
 
+test("the organizer sale notification itemizes promo, discount and tax", () => {
+  const email = read("../supabase/functions/_shared/email.ts");
+  assert.match(email, /\["Discount", `-\$\{money\(sale\.promo\.discount, sale\.currency\)\}`\],\s*\["Tax", money\(sale\.promo\.tax, sale\.currency\)\]/);
+  assert.match(orderEmail, /discount: order\.discount_amount_cents!, tax: order\.tax_cents!/);
+});
+
 test("the promo controls are comfortable touch targets on phones", () => {
   assert.match(checkoutView, /onClick=\{removePromo\}[\s\S]{0,80}className="[^"]*min-h-11/);
   assert.match(checkoutView, /onClick=\{\(\) => void applyPromo\(\)\}[\s\S]{0,120}className="h-10 /);

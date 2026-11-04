@@ -39,7 +39,7 @@ export interface SaleNotification {
   guestCount: number;
   amountTotal: number;
   currency: string;
-  promo?: { label: string; originalSubtotal: number; discount: number };
+  promo?: { label: string; originalSubtotal: number; discount: number; tax: number };
 }
 
 const BRAND_ASSETS = `${Deno.env.get("SUPABASE_URL")}/storage/v1/object/public/brand`;
@@ -150,6 +150,7 @@ export async function sendSaleNotification(sale: SaleNotification): Promise<void
           ["Promo", sale.promo.label],
           ["Original subtotal", money(sale.promo.originalSubtotal, sale.currency)],
           ["Discount", `-${money(sale.promo.discount, sale.currency)}`],
+          ["Tax", money(sale.promo.tax, sale.currency)],
         ]
       : []),
     ["Paid", total],

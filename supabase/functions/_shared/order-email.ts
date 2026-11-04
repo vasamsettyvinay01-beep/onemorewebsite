@@ -89,7 +89,7 @@ export async function sendOrderTicketEmail(
           amountTotal: order.amount_total,
           currency: order.currency,
           promo: promoted
-            ? { label, originalSubtotal: order.original_subtotal_cents!, discount: order.discount_amount_cents! }
+            ? { label, originalSubtotal: order.original_subtotal_cents!, discount: order.discount_amount_cents!, tax: order.tax_cents! }
             : undefined,
         });
         console.log(JSON.stringify({ msg: "sale_notification_sent", orderId }));
