@@ -29,6 +29,10 @@ interface Quote {
   promo: { code: string; percent: number } | null;
 }
 
+function exactMoney(cents: number, currency: string): string {
+  return new Intl.NumberFormat("en-US", { style: "currency", currency, minimumFractionDigits: 2 }).format(cents / 100);
+}
+
 function readQuote(key: string, body: Record<string, unknown>): Quote | null {
   if (typeof body.total !== "number" || typeof body.tax !== "number" || typeof body.subtotal !== "number") return null;
   const promo = body.promo as { code?: unknown; percent?: unknown } | null | undefined;
@@ -573,22 +577,22 @@ function CheckoutCard({ event, initialTier }: { event: OneMoreEvent; initialTier
               <>
                 <p className="mt-2 flex items-center justify-between text-[0.72rem] text-ivory/50">
                   <span className="eyebrow text-ivory/45">Ticket subtotal</span>
-                  <span>{formatMoney(priced.subtotal, tier.currency)}</span>
+                  <span>{exactMoney(priced.subtotal, tier.currency)}</span>
                 </p>
                 <p className="mt-1 flex items-center justify-between text-[0.72rem] text-gold">
                   <span className="eyebrow">{priced.promo.code} — {priced.promo.percent}% off</span>
-                  <span>−{formatMoney(priced.discount, tier.currency)}</span>
+                  <span>−{exactMoney(priced.discount, tier.currency)}</span>
                 </p>
               </>
             )}
             <p className={cn("flex items-center justify-between text-[0.72rem] text-ivory/50", priced?.promo ? "mt-1" : "mt-2")}>
               <span className="eyebrow text-ivory/45">Sales tax</span>
-              <span>{priced ? formatMoney(priced.tax, tier.currency) : "Calculating…"}</span>
+              <span>{priced ? (priced.promo ? exactMoney : formatMoney)(priced.tax, tier.currency) : "Calculating…"}</span>
             </p>
             {priced?.promo && (
               <p className="mt-2 flex items-center justify-between border-t border-ivory/10 pt-2 text-[0.8rem] text-ivory">
                 <span className="eyebrow text-ivory/70">Total</span>
-                <span className="font-display text-[1.25rem] leading-none">{formatMoney(priced.total, tier.currency)}</span>
+                <span className="font-display text-[1.25rem] leading-none">{exactMoney(priced.total, tier.currency)}</span>
               </p>
             )}
           </div>
