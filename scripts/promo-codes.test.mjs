@@ -224,3 +224,8 @@ test("the customer sees the promo, and only promo orders get a receipt block", (
   assert.match(orderEmail, /const receipt = promoted/);
   assert.match(passEmail, /if \(!receipt\) return "";/);
 });
+
+test("the promo controls are comfortable touch targets on phones", () => {
+  assert.match(checkoutView, /onClick=\{removePromo\}[\s\S]{0,80}className="[^"]*min-h-11/);
+  assert.match(checkoutView, /onClick=\{\(\) => void applyPromo\(\)\}[\s\S]{0,120}className="h-10 /);
+});

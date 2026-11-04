@@ -523,7 +523,7 @@ function CheckoutCard({ event, initialTier }: { event: OneMoreEvent; initialTier
                     type="button"
                     onClick={removePromo}
                     disabled={busy}
-                    className="text-[0.6rem] font-semibold uppercase tracking-[0.18em] text-ivory/55 underline-offset-4 transition-colors hover:text-ivory hover:underline disabled:opacity-40"
+                    className="-my-2 -mr-2 min-h-11 px-2 text-[0.6rem] font-semibold uppercase tracking-[0.18em] text-ivory/55 underline-offset-4 transition-colors hover:text-ivory hover:underline disabled:opacity-40"
                   >
                     Remove
                   </button>
