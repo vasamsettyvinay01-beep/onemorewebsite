@@ -11,12 +11,28 @@
 import Stripe from "npm:stripe@17";
 import { admin, corsHeaders, json } from "../_shared/http.ts";
 import { quoteTicketTotal } from "../_shared/pricing.ts";
-import { normalizePromoCode, priceTickets, PROMO_INVALID, promotionIsLive } from "../_shared/promo.mjs";
+import {
+  eligibleTierIds,
+  normalizePromoCode,
+  priceTickets,
+  PROMO_INVALID,
+  PROMO_NOT_ELIGIBLE,
+  promoEligibilityMessage,
+  promoTierSnapshot,
+  promotionAppliesToTier,
+  promotionIsLive,
+} from "../_shared/promo.mjs";
 
 interface LivePromotion {
   id: string;
   code: string;
   percent: number;
+  eligibleTierIds: string[];
+}
+
+interface PromoRejection {
+  error: string;
+  code: "promo_invalid" | "PROMO_NOT_ELIGIBLE";
 }
 
 const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY")!, { httpClient: Stripe.createFetchHttpClient() });
@@ -106,8 +122,10 @@ async function handle(req: Request): Promise<Response> {
   let promo: LivePromotion | null = null;
   if (promoCode !== "") {
     if (!(await rateLimit(`promo:${ip}`, 20, 600))) return json(req, { error: "Please wait a moment and try again." }, 429);
-    promo = promoCode === null ? null : await findPromotion(eventId, promoCode);
-    if (!promo) return json(req, { error: PROMO_INVALID, code: "promo_invalid" }, 422);
+    if (promoCode === null) return json(req, { error: PROMO_INVALID, code: "promo_invalid" }, 422);
+    const resolved = await findPromotion(eventId, promoCode, tierId);
+    if ("error" in resolved) return json(req, resolved, 422);
+    promo = resolved;
   }
 
   const unit = tier.price_cents as number;
@@ -131,6 +149,9 @@ async function handle(req: Request): Promise<Response> {
       promo: promo ? { code: promo.code, percent: promo.percent } : null,
     });
   }
+
+  const promoTiers = promo ? promoTierSnapshot(promo.eligibleTierIds) : "";
+  if (promo && !promoTiers) return json(req, { error: "Something went wrong. Please try again." }, 500);
 
   const idempotencyKey = typeof body.idempotencyKey === "string" && UUID_RE.test(body.idempotencyKey)
     ? body.idempotencyKey
@@ -178,6 +199,7 @@ async function handle(req: Request): Promise<Response> {
           omc_promo_code: promo?.code ?? "",
           omc_promotion_id: promo?.id ?? "",
           omc_discount_percent: promo ? String(promo.percent) : "",
+          omc_promo_eligible_tiers: promoTiers,
           omc_original_subtotal: String(priced.originalSubtotal),
           omc_discount_amount: String(priced.discount),
           omc_discounted_subtotal: String(priced.discountedSubtotal),
@@ -232,16 +254,29 @@ async function handle(req: Request): Promise<Response> {
   return json(req, { clientSecret: intent.client_secret, paymentIntentId: intent.id });
 }
 
-async function findPromotion(eventId: string, code: string): Promise<LivePromotion | null> {
+async function findPromotion(eventId: string, code: string, tierId: string): Promise<LivePromotion | PromoRejection> {
   const { data, error } = await admin
     .from("promotions")
-    .select("id, code, event_id, discount_type, discount_value, active, starts_at, expires_at")
+    .select("id, code, event_id, discount_type, discount_value, active, starts_at, expires_at, eligible_tier_ids")
     .eq("event_id", eventId)
     .eq("code", code)
     .maybeSingle();
   if (error) throw error;
-  if (!promotionIsLive(data, eventId)) return null;
-  return { id: data!.id, code: data!.code, percent: data!.discount_value };
+  if (!data || !promotionIsLive(data, eventId)) return { error: PROMO_INVALID, code: "promo_invalid" };
+  const tiers = eligibleTierIds(data);
+  if (!promotionAppliesToTier(data, tierId)) {
+    return { error: await eligibilityCopy(eventId, data.code, tiers), code: PROMO_NOT_ELIGIBLE };
+  }
+  return { id: data.id, code: data.code, percent: data.discount_value, eligibleTierIds: tiers };
+}
+
+async function eligibilityCopy(eventId: string, code: string, tierIds: string[]): Promise<string> {
+  if (tierIds.length === 0) return promoEligibilityMessage(code, []);
+  const { data, error } = await admin.from("tiers").select("tier_id, name").eq("event_id", eventId).in("tier_id", tierIds);
+  if (error) throw error;
+  const namesById = new Map((data ?? []).map((row: { tier_id: string; name: string }) => [row.tier_id, row.name]));
+  const names = tierIds.map((id) => namesById.get(id)).filter((name): name is string => typeof name === "string" && name.length > 0);
+  return promoEligibilityMessage(code, names);
 }
 
 async function reuseIntent(

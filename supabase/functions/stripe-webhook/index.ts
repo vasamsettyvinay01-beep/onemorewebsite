@@ -6,7 +6,7 @@ import Stripe from "npm:stripe@17";
 import { admin } from "../_shared/http.ts";
 import { sendOrderTicketEmail } from "../_shared/order-email.ts";
 import { quoteTicketTotal } from "../_shared/pricing.ts";
-import { normalizePromoCode, priceTickets } from "../_shared/promo.mjs";
+import { normalizePromoCode, priceTickets, promoSnapshotAllowsTier } from "../_shared/promo.mjs";
 
 const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY")!, { httpClient: Stripe.createFetchHttpClient() });
 const cryptoProvider = Stripe.createSubtleCryptoProvider();
@@ -113,6 +113,13 @@ async function fulfil(paymentIntentId: string, sessionId?: string) {
   const promo = await promoFromIntent(meta);
   if (promo === "invalid") {
     await refundAndStop(paymentIntentId, "promo_mismatch");
+    return;
+  }
+  // The allow-list is the one checkout froze on the PaymentIntent. Reading the
+  // promotions row again would reject a charge that was valid when it was created.
+  // A missing snapshot is an older PaymentIntent and keeps the previous behaviour.
+  if (promo && promoSnapshotAllowsTier(meta.omc_promo_eligible_tiers ?? "", meta.omc_tier_id) === "ineligible") {
+    await refundAndStop(paymentIntentId, "promo_ineligible");
     return;
   }
 

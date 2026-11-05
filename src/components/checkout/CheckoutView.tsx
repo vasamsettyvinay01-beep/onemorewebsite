@@ -33,6 +33,15 @@ function exactMoney(cents: number, currency: string): string {
   return new Intl.NumberFormat("en-US", { style: "currency", currency, minimumFractionDigits: 2 }).format(cents / 100);
 }
 
+function promoRejectionMessage(status: number, body: unknown): string | null {
+  if (status !== 422 || !body || typeof body !== "object") return null;
+  const code = "code" in body ? body.code : undefined;
+  const error = "error" in body ? body.error : undefined;
+  if (code === "PROMO_NOT_ELIGIBLE" && typeof error === "string" && error.trim()) return error;
+  if (code === "promo_invalid" || code === "PROMO_NOT_ELIGIBLE") return PROMO_INVALID;
+  return null;
+}
+
 function readQuote(key: string, body: Record<string, unknown>): Quote | null {
   if (typeof body.total !== "number" || typeof body.tax !== "number" || typeof body.subtotal !== "number") return null;
   const promo = body.promo as { code?: unknown; percent?: unknown } | null | undefined;
@@ -220,9 +229,10 @@ function CheckoutCard({ event, initialTier }: { event: OneMoreEvent; initialTier
       .then(async (res) => {
         const body = await res.json().catch(() => null);
         if (stale) return;
-        if (res.status === 422 && body?.code === "promo_invalid") {
+        const rejected = promoRejectionMessage(res.status, body);
+        if (rejected) {
           setPromoCode(null);
-          setPromoError(PROMO_INVALID);
+          setPromoError(rejected);
           return;
         }
         const next = res.ok && body ? readQuote(quoteKey, body) : null;
@@ -261,14 +271,17 @@ function CheckoutCard({ event, initialTier }: { event: OneMoreEvent; initialTier
       const body = await res.json().catch(() => ({}));
       const applied = res.ok && body?.promo?.code ? String(body.promo.code) : null;
       const next = applied ? readQuote(`${tier!.id}:${qty}:${applied}`, body) : null;
+      const rejected = promoRejectionMessage(res.status, body);
       if (applied && next) {
         setQuote(next);
         setPromoCode(applied);
         setPromoDraft(applied);
-      } else if (res.status === 422 || res.ok) {
+      } else if (rejected) {
+        setPromoError(rejected);
+      } else if (res.ok) {
         setPromoError(PROMO_INVALID);
       } else {
-        setPromoError(body?.error ?? "Something went wrong. Please try again.");
+        setPromoError(typeof body?.error === "string" ? body.error : "Something went wrong. Please try again.");
       }
     } catch {
       setPromoError("Something went wrong. Please try again.");
@@ -315,9 +328,10 @@ function CheckoutCard({ event, initialTier }: { event: OneMoreEvent; initialTier
       }),
     });
     const body = await res.json().catch(() => ({}));
-    if (body.code === "promo_invalid") {
+    const rejected = promoRejectionMessage(res.status, body);
+    if (rejected) {
       setPromoCode(null);
-      setPromoError(PROMO_INVALID);
+      setPromoError(rejected);
     }
     if (!res.ok || !body.clientSecret) throw new Error(body.error ?? "Something went wrong. Please try again.");
     return body as { clientSecret: string; paymentIntentId: string };

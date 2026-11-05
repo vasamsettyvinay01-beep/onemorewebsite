@@ -2,12 +2,17 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
+  eligibleTierIds,
   normalizePromoCode,
   parsePromoFilter,
   percentDiscountCents,
   priceTickets,
   PROMO_INVALID,
+  promoEligibilityMessage,
   promoLabel,
+  promoSnapshotAllowsTier,
+  promoTierSnapshot,
+  promotionAppliesToTier,
   promotionIsLive,
 } from "../supabase/functions/_shared/promo.mjs";
 import { permit } from "../supabase/functions/_shared/staff-auth.mjs";
@@ -36,6 +41,7 @@ const GISO15 = {
   active: true,
   starts_at: null,
   expires_at: null,
+  eligible_tier_ids: ["female", "general"],
 };
 
 // SQL in create_order_with_tickets: (v_subtotal * p_discount_percent + 50) / 100 on int.
@@ -58,7 +64,7 @@ test("malformed codes never reach the database", () => {
   assert.equal(PROMO_INVALID, "PROMO CODE NOT VALID");
 });
 
-test("15% is computed on integer cents for every live tier, matching the SQL rounding", () => {
+test("15% rounding matches the order SQL for each published price", () => {
   const tiers = [
     ["Early Bird", 1499, 225, 1274],
     ["Female", 1799, 270, 1529],
@@ -110,6 +116,109 @@ test("a promotion is live only for its event, while active and in its window", (
   assert.equal(promotionIsLive(null, "evt_diwali_night", now), false);
 });
 
+test("GISO15 is eligible only for the female and male tier ids", () => {
+  assert.equal(promoEligibilityMessage("GISO15", ["Female", "Male"]), "GISO15 is valid for Female and Male tickets only.");
+  assert.deepEqual(eligibleTierIds(GISO15), ["female", "general"]);
+  assert.equal(promoTierSnapshot(["general", "female", "female"]), "female,general");
+  for (const raw of ["giso15", "  giso15 \t", "Giso15", "GISO15"]) {
+    assert.equal(normalizePromoCode(raw), "GISO15");
+    assert.equal(promotionAppliesToTier(GISO15, "female"), true, raw);
+    assert.equal(promotionAppliesToTier(GISO15, "general"), true, raw);
+  }
+  const female = priceTickets({ unitCents: 1799, quantity: 1, percent: 15 });
+  assert.deepEqual(female, { originalSubtotal: 1799, discount: 270, discountedSubtotal: 1529 });
+  const male = priceTickets({ unitCents: 1999, quantity: 1, percent: 15 });
+  assert.deepEqual(male, { originalSubtotal: 1999, discount: 300, discountedSubtotal: 1699 });
+});
+
+test("GISO15 does not discount ineligible tiers, independent of sold-out or active state", () => {
+  for (const tier of ["couple", "group", "early-bird", "group-8", "vip", "complimentary", "future-pass", "Female", "male"]) {
+    assert.equal(promotionAppliesToTier(GISO15, tier), false, tier);
+  }
+  const couple = priceTickets({ unitCents: 2999, quantity: 1, percent: promotionAppliesToTier(GISO15, "couple") ? 15 : 0 });
+  assert.equal(couple.discount, 0);
+  assert.equal(couple.discountedSubtotal, 2999);
+  assert.notEqual(couple.discountedSubtotal, 2549);
+  const group = priceTickets({ unitCents: 8999, quantity: 1, percent: promotionAppliesToTier(GISO15, "group") ? 15 : 0 });
+  assert.equal(group.discount, 0);
+  assert.equal(group.discountedSubtotal, 8999);
+  assert.notEqual(group.discountedSubtotal, 7649);
+  assert.equal(promotionAppliesToTier(GISO15, "early-bird"), false);
+  assert.equal(promotionAppliesToTier(GISO15, "group-8"), false);
+  assert.doesNotMatch(read("../supabase/functions/_shared/promo.mjs"), /capacity|soldOut|sold_out|vip|complimentary/);
+});
+
+test("switching tickets keeps the discount only when the new tier is eligible", () => {
+  const onFemale = priceTickets({ unitCents: 1799, quantity: 1, percent: promotionAppliesToTier(GISO15, "female") ? 15 : 0 });
+  assert.equal(onFemale.discount, 270);
+  const switchedToCouple = priceTickets({ unitCents: 2999, quantity: 1, percent: promotionAppliesToTier(GISO15, "couple") ? 15 : 0 });
+  assert.deepEqual(switchedToCouple, { originalSubtotal: 2999, discount: 0, discountedSubtotal: 2999 });
+  const switchedToMale = priceTickets({ unitCents: 1999, quantity: 1, percent: promotionAppliesToTier(GISO15, "general") ? 15 : 0 });
+  assert.deepEqual(switchedToMale, { originalSubtotal: 1999, discount: 300, discountedSubtotal: 1699 });
+});
+
+test("the checkout snapshot, not a later promotion edit, decides webhook eligibility", () => {
+  assert.equal(promoSnapshotAllowsTier("female,general", "female"), "allowed");
+  assert.equal(promoSnapshotAllowsTier("female,general", "general"), "allowed");
+  for (const tier of ["couple", "group", "early-bird", "group-8", "vip", "complimentary"]) {
+    assert.equal(promoSnapshotAllowsTier("female,general", tier), "ineligible", tier);
+  }
+  assert.equal(promoSnapshotAllowsTier("", "couple"), "legacy");
+  assert.equal(promoSnapshotAllowsTier(undefined, "female"), "legacy");
+  assert.equal(promoSnapshotAllowsTier("female,general", "female"), "allowed");
+  assert.equal(promoSnapshotAllowsTier("not a tier", "female"), "ineligible");
+  const fulfil = webhook.slice(webhook.indexOf("async function fulfil"), webhook.indexOf("async function promoFromIntent"));
+  const stop = fulfil.indexOf('refundAndStop(paymentIntentId, "promo_ineligible")');
+  const rpc = fulfil.indexOf("create_order_with_tickets");
+  assert.ok(stop > 0 && stop < rpc);
+  assert.doesNotMatch(fulfil, /eligible_tier_ids/);
+});
+
+test("eligibility is data on the promotion and is checked before a discount is priced", () => {
+  const eligibility = read("../supabase/migrations/20261107000000_promo_ticket_eligibility.sql");
+  assert.match(eligibility, /add column eligible_tier_ids text\[\]/);
+  assert.match(eligibility, /array\['female', 'general'\]/);
+  assert.doesNotMatch(eligibility, /update\s+public\.orders|delete\s+from\s+public\.orders/i);
+  assert.doesNotMatch(eligibility, /create_order_with_tickets|lock_order_pricing/);
+  const gate = checkout.slice(checkout.indexOf('if (promoCode !== "")'), checkout.indexOf("const unit = tier.price_cents"));
+  assert.match(gate, /findPromotion\(eventId, promoCode, tierId\)/);
+  assert.match(gate, /return json\(req, resolved, 422\)/);
+  const reject = checkout.indexOf("return json(req, resolved, 422)");
+  const price = checkout.indexOf("priceTickets(");
+  assert.ok(reject > 0 && reject < price);
+  assert.match(checkout, /promotionAppliesToTier\(data, tierId\)/);
+  assert.match(checkout, /PROMO_NOT_ELIGIBLE/);
+  assert.match(checkout, /eligible_tier_ids/);
+  assert.match(checkout, /omc_promo_eligible_tiers: promoTiers/);
+  const soldOut = checkout.indexOf("if (tier.capacity)");
+  assert.ok(soldOut > 0 && soldOut < checkout.indexOf('if (promoCode !== "")'));
+  assert.doesNotMatch(checkout, /mixed cart|lineItems/);
+});
+
+test("the checkout clears a promo the server rejects for the newly selected ticket", () => {
+  assert.match(checkoutView, /PROMO_NOT_ELIGIBLE/);
+  assert.match(checkoutView, /function promoRejectionMessage/);
+  assert.match(checkoutView, /setPromoCode\(null\)/);
+  assert.match(checkoutView, /\$\{tier\?\.id\}:\$\{qty\}:\$\{promoCode/);
+  assert.match(checkoutView, /quote\?\.key === quoteKey \? quote : null/);
+  assert.match(checkoutView, /tierId: tier!\.id/);
+  assert.match(checkoutView, /promoCode: entered/);
+});
+
+test("vip invitations and complimentary admissions have no promo relationship", () => {
+  const vip = read("../supabase/functions/vip-pass/index.ts");
+  const vipMigration = read("../supabase/migrations/20261105000000_vip_invitations.sql");
+  const complimentary = read("../supabase/migrations/20261106000000_complimentary_admissions.sql");
+  const adminIssue = adminFn.slice(adminFn.indexOf("async function issueComplimentary"), adminFn.indexOf("async function resendComplimentary"));
+  assert.doesNotMatch(vip, /promo|GISO15|eligible_tier/);
+  assert.doesNotMatch(vipMigration, /GISO15|eligible_tier|from\("promotions"\)/);
+  assert.doesNotMatch(complimentary, /GISO15|eligible_tier|promotions/);
+  assert.doesNotMatch(adminIssue, /promo|GISO15|eligible_tier/);
+  const report = adminFn.slice(adminFn.indexOf("async function promoReport"), adminFn.indexOf("async function sales"));
+  assert.match(report, /\.eq\("promotion_id", promotion\.id\)/);
+  assert.doesNotMatch(report, /eligible_tier/);
+});
+
 test("admin promo filter accepts all, none, or a canonical code", () => {
   assert.equal(parsePromoFilter(""), "");
   assert.equal(parsePromoFilter(undefined), "");
@@ -122,7 +231,20 @@ test("admin promo filter accepts all, none, or a canonical code", () => {
 
 test("checkout trusts only the typed code and prices everything on the server", () => {
   assert.match(checkout, /normalizePromoCode\(body\.promoCode\)/);
-  for (const field of ["discount", "discountPercent", "percent", "total", "subtotal", "amount", "tax", "discountedSubtotal"]) {
+  for (const field of [
+    "discount",
+    "discountPercent",
+    "percent",
+    "total",
+    "subtotal",
+    "amount",
+    "tax",
+    "discountedSubtotal",
+    "eligible_ticket_types",
+    "eligibleTierIds",
+    "eligible_tier_ids",
+    "tierName",
+  ]) {
     assert.doesNotMatch(checkout, new RegExp(`body\\.${field}\\b`), field);
   }
   assert.match(checkout, /\.from\("promotions"\)/);
@@ -152,6 +274,9 @@ test("the webhook re-verifies the promo and the discounted amount before tickets
   assert.match(webhook, /\.from\("promotions"\)/);
   assert.match(webhook, /data\.event_id !== meta\.omc_event_id/);
   assert.match(webhook, /refundAndStop\(paymentIntentId, "promo_mismatch"\)/);
+  assert.match(webhook, /promoSnapshotAllowsTier\(meta\.omc_promo_eligible_tiers \?\? "", meta\.omc_tier_id\) === "ineligible"/);
+  assert.match(webhook, /refundAndStop\(paymentIntentId, "promo_ineligible"\)/);
+  assert.doesNotMatch(webhook, /eligible_tier_ids/);
   assert.match(webhook, /amount < priced\.discountedSubtotal/);
   assert.match(webhook, /quoteTicketTotal\(stripe, tier\.currency, priced\.discountedSubtotal, meta\.omc_tier_id\)/);
   assert.match(webhook, /p_promo_code: promo\.code/);
