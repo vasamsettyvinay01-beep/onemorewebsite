@@ -27,20 +27,37 @@ export interface PassEmail {
   sealUrl: string;
   ticketsUrl: string;
   passes: { guest_number: number; token: string; qrSrc: string }[];
+  /**
+   * A mixed-ticket order: the same passes, grouped by ticket type, each group
+   * under its own heading ("FEMALE · 1 admission"). Absent for single-ticket orders.
+   */
+  groups?: { tierName: string; passes: { guest_number: number; token: string; qrSrc: string }[] }[];
   /** Inbox the pass is sent to. Used for the greeting when no name was given. */
   to?: string;
-  /** Payment lines, shown under the passes only when a promo code was used. Preformatted money. */
-  receipt?: { promo: string; originalSubtotal: string; discount: string; tax: string; total: string };
+  /**
+   * Payment lines under the passes. Single-ticket orders show them only when a promo
+   * code was used; mixed-ticket orders always show them. Preformatted money.
+   * `promo` and `discount` are present only when a code was used.
+   */
+  receipt?: {
+    promo?: string;
+    originalSubtotal: string;
+    discount?: string;
+    discountLabel?: string;
+    tax: string;
+    total: string;
+    totalLabel?: string;
+  };
 }
 
 function receiptBlock(receipt: PassEmail["receipt"]): string {
   if (!receipt) return "";
   const rows: [string, string][] = [
-    ["Promo", receipt.promo],
-    ["Original ticket subtotal", receipt.originalSubtotal],
-    ["Discount", receipt.discount],
+    ...(receipt.promo ? ([["Promo", receipt.promo]] as [string, string][]) : []),
+    [receipt.promo && !receipt.discountLabel ? "Original ticket subtotal" : "Original subtotal", receipt.originalSubtotal],
+    ...(receipt.discount ? ([[receipt.discountLabel ?? "Discount", receipt.discount]] as [string, string][]) : []),
     ["Tax", receipt.tax],
-    ["Final total", receipt.total],
+    [receipt.totalLabel ?? "Final total", receipt.total],
   ];
   const cells = rows
     .map(
@@ -76,8 +93,9 @@ const caps = (size: number, color: string, spacing = 0.32) =>
   `font:600 ${size}px/1.4 ${SANS};letter-spacing:${spacing}em;text-transform:uppercase;color:${color}`;
 
 /** One code per row, so a couple pass scans top, then bottom. */
-function qrRows(passes: PassEmail["passes"], total: number) {
-  const size = total > 1 ? 108 : 150;
+function qrRows(passes: PassEmail["passes"], total: number, grouped = false, orderTotal = total) {
+  // A grouped (mixed-ticket) email numbers passes within their ticket type and always shows the pass reference.
+  const size = orderTotal > 1 ? 108 : 150;
   return passes
     .map((p, i) => {
       const ref = p.token.slice(-6).toUpperCase();
@@ -85,13 +103,14 @@ function qrRows(passes: PassEmail["passes"], total: number) {
         i > 0
           ? `<div style="margin:4px 28px 0;border-top:1px dashed ${C.goldDim};line-height:0;font-size:0">&nbsp;</div>`
           : "";
+      const number = grouped ? i + 1 : p.guest_number;
       return `<tr><td align="center" style="padding:0">
         ${rule}
-        <div style="margin-top:4px;${caps(8, C.gold, 0.26)}">${pad2(p.guest_number)} / ${pad2(total)}${total > 1 ? ` &nbsp;&middot;&nbsp; <span style="font:400 10px/1 ${MONO};letter-spacing:0.22em">N&ordm; ${ref}</span>` : ""}</div>
+        <div style="margin-top:4px;${caps(8, C.gold, 0.26)}">${pad2(number)} / ${pad2(total)}${total > 1 || grouped ? ` &nbsp;&middot;&nbsp; <span style="font:400 10px/1 ${MONO};letter-spacing:0.22em">N&ordm; ${ref}</span>` : ""}</div>
         <table role="presentation" cellpadding="0" cellspacing="0" bgcolor="${C.qr}" style="margin-top:4px;background:${C.qr};border:1px solid ${C.gold}"><tr>
           <td bgcolor="${C.qr}" style="padding:4px;background:${C.qr}"><img src="${p.qrSrc}" width="${size}" height="${size}" alt="Pass ${p.guest_number} QR code" style="display:block;width:${size}px;height:${size}px;border:0"></td>
         </tr></table>
-        ${total === 1 ? `<div style="margin-top:4px;font:400 10px/1 ${MONO};letter-spacing:0.28em;color:${C.gold}">N&ordm; ${ref}</div>` : ""}
+        ${total === 1 && !grouped ? `<div style="margin-top:4px;font:400 10px/1 ${MONO};letter-spacing:0.28em;color:${C.gold}">N&ordm; ${ref}</div>` : ""}
       </td></tr>`;
     })
     .join("");
@@ -156,6 +175,7 @@ export function renderPassEmail(input: PassEmail): { subject: string; html: stri
   const first = named?.split(" ")[0] ?? nameFromEmail(input.to);
   const d = { ...input, name: named ?? first };
   const total = d.passes.length;
+  const grouped = !!d.groups?.length;
   const venue = d.mapUrl
     ? `<a href="${d.mapUrl}" style="color:${C.ivory};text-decoration:none">${esc(d.venueName)}</a>`
     : esc(d.venueName);
@@ -184,13 +204,26 @@ export function renderPassEmail(input: PassEmail): { subject: string; html: stri
     <tr><td bgcolor="${C.stock}" style="padding:6px 10px 0;background:${C.stock}">
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="${C.gold}" style="background:${C.gold}"><tr><td bgcolor="${C.gold}" style="padding:1px;background:${C.gold}">
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="${C.card}" style="background:${C.card}"><tr><td align="center" bgcolor="${C.card}" style="padding:8px 6px 8px;background:${C.card}">
-          <div style="${caps(8, C.gold, 0.28)}">Admit one &middot; ${esc(d.tierName)}</div>
+          <div style="${caps(8, C.gold, 0.28)}">${grouped ? "Your passes" : `Admit one &middot; ${esc(d.tierName)}`}</div>
           ${d.name ? `<div style="margin-top:2px;font:italic 400 17px/1.1 ${SERIF};color:${C.ivory};white-space:nowrap">${esc(d.name)}</div>` : ""}
-          <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
-            ${qrRows(d.passes, total)}
-          </table>
           ${
-            total === 1
+            grouped
+              ? d.groups!
+                  .map(
+                    (group) => `<div style="margin:8px 8px 0;border-top:1px solid ${C.goldDim};line-height:0;font-size:0">&nbsp;</div>
+          <div style="margin-top:6px;${caps(10, C.ivory, 0.22)}">${esc(group.tierName)}</div>
+          <div style="margin-top:1px;${caps(8, C.gold, 0.2)}">${group.passes.length} ${group.passes.length === 1 ? "admission" : "admissions"}</div>
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+            ${qrRows(group.passes, group.passes.length, true, total)}
+          </table>`,
+                  )
+                  .join("")
+              : `<table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+            ${qrRows(d.passes, total)}
+          </table>`
+          }
+          ${
+            total === 1 && !grouped
               ? `<div style="margin:7px 8px 0;border-top:1px dashed ${C.goldDim};line-height:0;font-size:0">&nbsp;</div>
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:5px"><tr>
             <td style="${caps(7, C.muted, 0.1)};white-space:nowrap">${esc(d.dateLabel)}</td>
@@ -223,7 +256,13 @@ export function renderPassEmail(input: PassEmail): { subject: string; html: stri
     "",
     `${d.dateLabel} · ${d.timeLabel}`,
     `${d.venueName}, ${d.venueAddress}`,
-    `${d.tierName} · ${total} ${total === 1 ? "guest" : "guests"}`,
+    ...(grouped
+      ? [
+          "YOUR PASSES",
+          ...d.groups!.map((group) => `${group.tierName} — ${group.passes.length} ${group.passes.length === 1 ? "admission" : "admissions"}`),
+          `${total} ${total === 1 ? "guest" : "guests"} in all`,
+        ]
+      : [`${d.tierName} · ${total} ${total === 1 ? "guest" : "guests"}`]),
     "",
     ...(d.invitation ? [d.invitation, ""] : []),
     ...(d.partners?.length ? [`Partners: ${d.partners.map((p) => p.name).join(", ")}`, ""] : []),
@@ -233,11 +272,11 @@ export function renderPassEmail(input: PassEmail): { subject: string; html: stri
     "",
     ...(d.receipt
       ? [
-          `Promo: ${d.receipt.promo}`,
-          `Original ticket subtotal: ${d.receipt.originalSubtotal}`,
-          `Discount: ${d.receipt.discount}`,
+          ...(d.receipt.promo ? [`Promo: ${d.receipt.promo}`] : []),
+          `${d.receipt.promo && !d.receipt.discountLabel ? "Original ticket subtotal" : "Original subtotal"}: ${d.receipt.originalSubtotal}`,
+          ...(d.receipt.discount ? [`${d.receipt.discountLabel ?? "Discount"}: ${d.receipt.discount}`] : []),
           `Tax: ${d.receipt.tax}`,
-          `Final total: ${d.receipt.total}`,
+          `${d.receipt.totalLabel ?? "Final total"}: ${d.receipt.total}`,
           "",
         ]
       : []),

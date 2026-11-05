@@ -25,7 +25,23 @@ export interface TimelinePoint {
   issued: number;
 }
 
+/** One ticket-type line of a mixed-ticket order. Older single-ticket orders have none. */
+export interface OrderLine {
+  tierId: string;
+  name: string;
+  unitPrice: number;
+  quantity: number;
+  admissions: number;
+  lineSubtotal: number;
+  promoEligible: boolean;
+  discount: number;
+  discountedSubtotal: number;
+  tax: number;
+  lineTotal: number;
+}
+
 export interface OrderRecord {
+  items?: OrderLine[];
   ref: string;
   purchaser: string | null;
   email: string;
@@ -51,6 +67,9 @@ export interface OrderRecord {
 }
 
 export interface PromoOrder {
+  items?: OrderLine[];
+  /** Passes on the lines the code actually discounted. */
+  discountedAdmissions?: number;
   ref: string;
   purchaser: string | null;
   email: string;
@@ -85,6 +104,9 @@ export interface PromoPerformance {
     disputedOrders: number;
     admissionsActive: number;
     admissionsIssued: number;
+    /** Every pass in an order that used the code, including lines the code did not discount. */
+    orderAdmissionsActive?: number;
+    orderAdmissionsIssued?: number;
     originalValue: number;
     discounts: number;
     netSubtotal: number;
@@ -135,7 +157,7 @@ export interface Overview {
 export interface OrderDetail {
   order: OrderRecord;
   admits: number;
-  tickets: { ref: string; guestNumber: number; status: string; checkedInAt: string | null }[];
+  tickets: { ref: string; guestNumber: number; tier?: string; status: string; checkedInAt: string | null }[];
 }
 
 export interface AdminEvent {

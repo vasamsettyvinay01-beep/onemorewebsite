@@ -37,8 +37,8 @@ export function PromoPanel() {
         <p className="text-[0.65rem] uppercase tracking-[0.16em] text-white/40">Promo performance</p>
         <h1 className="text-xl font-semibold tracking-tight">{event?.name ?? "Event"}</h1>
         <p className="mt-1 text-sm text-white/55">
-          Figures come from the price recorded on each order when it was paid. Orders count purchases; admissions count the
-          individual passes those purchases issued.
+          Figures come from the price recorded on each order when it was paid. Orders count purchases; discounted admissions
+          count the passes on the lines the code actually discounted, so a Couple or Group in the same cart is not counted.
         </p>
       </header>
       {!current && <p className="text-sm text-white/50">Loading promo performance…</p>}
@@ -77,9 +77,13 @@ function PromoSection({ promo }: { promo: PromoPerformance }) {
         <Stat label="Discount" value={discountLabel} />
         <Stat label={`Orders using ${promo.code}`} value={count(s.orders)} hint={orderHint} />
         <Stat
-          label={`Admission tickets via ${promo.code}`}
+          label={`Discounted admissions via ${promo.code}`}
           value={count(s.admissionsActive)}
-          hint={`${count(s.admissionsIssued)} issued, including cancelled`}
+          hint={
+            s.orderAdmissionsActive != null && s.orderAdmissionsActive !== s.admissionsActive
+              ? `${count(s.admissionsIssued)} issued, including cancelled · ${count(s.orderAdmissionsActive)} admissions in these orders in total`
+              : `${count(s.admissionsIssued)} issued, including cancelled`
+          }
         />
       </div>
 
@@ -140,7 +144,12 @@ function PromoSection({ promo }: { promo: PromoPerformance }) {
                     <td className="py-2 pr-3">{order.purchaser || "Guest"}</td>
                     <td className="max-w-[12rem] truncate py-2 pr-3 text-white/70">{order.email}</td>
                     <td className="py-2 pr-3">{order.tier}</td>
-                    <td className="py-2 pr-3 tabular-nums">{order.units} / {order.admissions}</td>
+                    <td className="py-2 pr-3 tabular-nums">
+                      {order.units} / {order.admissions}
+                      {order.discountedAdmissions != null && order.discountedAdmissions !== order.admissions && (
+                        <span className="text-white/45"> · {order.discountedAdmissions} discounted</span>
+                      )}
+                    </td>
                     <td className="py-2 pr-3">{order.promoCode}{order.discountPercent != null && <span className="text-white/45"> · {order.discountPercent}%</span>}</td>
                     <td className="py-2 pr-3 tabular-nums">{money(order.originalSubtotal, order.currency)}</td>
                     <td className="py-2 pr-3 tabular-nums">−{money(order.discount, order.currency)}</td>

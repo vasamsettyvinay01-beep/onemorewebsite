@@ -5,8 +5,9 @@
 import Stripe from "npm:stripe@17";
 import { admin } from "../_shared/http.ts";
 import { sendOrderTicketEmail } from "../_shared/order-email.ts";
-import { quoteTicketTotal } from "../_shared/pricing.ts";
+import { quoteCartTotal, quoteTicketTotal } from "../_shared/pricing.ts";
 import { normalizePromoCode, priceTickets, promoSnapshotAllowsTier } from "../_shared/promo.mjs";
+import { cartMetaSummary, verifyCartSnapshot } from "../_shared/cart.mjs";
 
 const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY")!, { httpClient: Stripe.createFetchHttpClient() });
 const cryptoProvider = Stripe.createSubtleCryptoProvider();
@@ -95,6 +96,8 @@ async function fulfil(paymentIntentId: string, sessionId?: string) {
   const pi = await stripe.paymentIntents.retrieve(paymentIntentId);
   if (pi.status !== "succeeded") return;
   const meta = pi.metadata ?? {};
+  // A mixed-ticket cart carries a snapshot reference instead of a single tier.
+  if (meta.omc_cart_id) return fulfilCart(pi, sessionId);
   if (!meta.omc_event_id || !meta.omc_tier_id) return;
 
   const email = meta.omc_email || pi.receipt_email;
@@ -191,6 +194,150 @@ async function promoFromIntent(
   if (error) throw error;
   if (!data || data.code !== code || data.event_id !== meta.omc_event_id || data.discount_type !== "percentage") return "invalid";
   return { id: data.id, code: data.code, percent };
+}
+
+// ── Mixed-ticket cart fulfilment ─────────────────────────────────────────────
+// Everything is validated against the cart snapshot checkout froze, not against
+// whatever the tiers or promotions say today. Any failed check refunds the
+// payment and creates nothing. Idempotent on the payment intent, like fulfil().
+
+const CART_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+async function fulfilCart(pi: Stripe.PaymentIntent, sessionId?: string) {
+  const paymentIntentId = pi.id;
+  const meta = pi.metadata ?? {};
+  const email = meta.omc_email || pi.receipt_email;
+  const cartId = meta.omc_cart_id ?? "";
+  if (!email || !meta.omc_event_id || !CART_ID_RE.test(cartId)) {
+    await refundAndStop(paymentIntentId, "cart_metadata");
+    return;
+  }
+
+  const { data: cart, error: cartError } = await admin
+    .from("checkout_carts")
+    .select("id, event_id, payment_intent_id, currency, total_cents, snapshot")
+    .eq("id", cartId)
+    .maybeSingle();
+  if (cartError) throw cartError;
+  if (!cart) {
+    await refundAndStop(paymentIntentId, "cart_missing");
+    return;
+  }
+  if (cart.event_id !== meta.omc_event_id) {
+    await refundAndStop(paymentIntentId, "cart_event");
+    return;
+  }
+  if (cart.payment_intent_id && cart.payment_intent_id !== paymentIntentId) {
+    await refundAndStop(paymentIntentId, "cart_payment");
+    return;
+  }
+
+  const snapshot = cart.snapshot as {
+    currency: string;
+    lines: { tierId: string; name: string; quantity: number; discountedLineCents: number; promoEligible: boolean }[];
+    originalSubtotal: number;
+    discount: number;
+    discountedSubtotal: number;
+    tax: number;
+    total: number;
+    promo: { id: string; code: string; percent: number; eligibleTiers: string } | null;
+  };
+  const broken = verifyCartSnapshot(snapshot);
+  if (broken || snapshot.total !== cart.total_cents || snapshot.currency !== cart.currency) {
+    console.error(JSON.stringify({ msg: "cart_snapshot_invalid", paymentIntentId, reason: broken ?? "totals" }));
+    await refundAndStop(paymentIntentId, "cart_snapshot");
+    return;
+  }
+  if (
+    cartMetaSummary(snapshot.lines) !== (meta.omc_cart ?? "") ||
+    meta.omc_original_subtotal !== String(snapshot.originalSubtotal) ||
+    meta.omc_discount_amount !== String(snapshot.discount) ||
+    meta.omc_discounted_subtotal !== String(snapshot.discountedSubtotal) ||
+    meta.omc_tax !== String(snapshot.tax) ||
+    meta.omc_expected_total !== String(snapshot.total)
+  ) {
+    await refundAndStop(paymentIntentId, "cart_mismatch");
+    return;
+  }
+
+  const promo = await promoFromIntent(meta);
+  if (promo === "invalid") {
+    await refundAndStop(paymentIntentId, "promo_mismatch");
+    return;
+  }
+  const frozen = snapshot.promo;
+  if (!!promo !== !!frozen) {
+    await refundAndStop(paymentIntentId, "promo_mismatch");
+    return;
+  }
+  if (promo && frozen) {
+    if (
+      frozen.id !== promo.id ||
+      frozen.code !== promo.code ||
+      frozen.percent !== promo.percent ||
+      frozen.eligibleTiers !== (meta.omc_promo_eligible_tiers ?? "") ||
+      !snapshot.lines.some((line) => line.promoEligible) ||
+      snapshot.lines.some((line) => line.promoEligible !== (promoSnapshotAllowsTier(frozen.eligibleTiers, line.tierId) === "allowed"))
+    ) {
+      await refundAndStop(paymentIntentId, "promo_ineligible");
+      return;
+    }
+  }
+
+  const amount = pi.amount_received || 0;
+  if (pi.currency !== snapshot.currency || amount !== snapshot.total || amount !== pi.amount) {
+    await refundAndStop(paymentIntentId, "amount_mismatch");
+    return;
+  }
+
+  const ids = snapshot.lines.map((line) => line.tierId);
+  const { data: tiers, error: tierError } = await admin
+    .from("tiers")
+    .select("tier_id, price_cents, currency")
+    .eq("event_id", cart.event_id)
+    .in("tier_id", ids);
+  if (tierError) throw tierError;
+  if ((tiers ?? []).length !== ids.length || (tiers ?? []).some((tier: { currency: string }) => tier.currency !== snapshot.currency)) {
+    await refundAndStop(paymentIntentId, "unknown_pass");
+    return;
+  }
+
+  const quoted = await quoteCartTotal(
+    stripe,
+    snapshot.currency,
+    snapshot.lines.map((line) => ({ amount: line.discountedLineCents, reference: line.tierId })),
+  );
+  if (amount < quoted.total) {
+    await refundAndStop(paymentIntentId, "tax_mismatch");
+    return;
+  }
+
+  const { data, error } = await admin.rpc("create_cart_order", {
+    p_session_id: sessionId ?? paymentIntentId,
+    p_payment_intent: paymentIntentId,
+    p_cart_id: cart.id,
+    p_name: meta.omc_name || null,
+    p_email: email,
+    p_amount_total: amount,
+    p_currency: pi.currency,
+  });
+  if (error) throw error;
+  const row = (Array.isArray(data) ? data[0] : data) as { order_id: string | null; outcome: string };
+  console.log(JSON.stringify({
+    msg: "fulfil_cart",
+    paymentIntentId,
+    outcome: row?.outcome,
+    orderId: row?.order_id,
+    cart: meta.omc_cart,
+    promoCode: promo?.code ?? null,
+    discount: snapshot.discount,
+  }));
+  if (!row || row.outcome === "oversold" || row.outcome === "underpaid" || row.outcome === "rejected") {
+    await refundAndStop(paymentIntentId, row?.outcome ?? "rejected");
+    return;
+  }
+  if (!row.order_id) return;
+  await sendOrderTicketEmail(row.order_id, meta, paymentIntentId);
 }
 
 async function refundAndStop(paymentIntentId: string, reason: string) {

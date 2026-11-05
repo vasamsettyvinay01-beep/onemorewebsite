@@ -23,7 +23,7 @@ Deno.serve(async (req) => {
   let query = admin
     .from("orders")
     .select(
-      "event_id, tier_name, purchaser_name, status, access_token, tickets(guest_number, token, status, checked_in_at, guest_name, ticket_shares(opened_at, revoked_at))",
+      "event_id, tier_name, purchaser_name, status, access_token, order_items(tier_id, display_name_snapshot), tickets(guest_number, token, status, tier_id, checked_in_at, guest_name, ticket_shares(opened_at, revoked_at))",
     );
   if (accessToken && /^[0-9a-f]{48}$/.test(accessToken)) query = query.eq("access_token", accessToken);
   else if (sessionId && /^(cs_(test|live)_|pi_)[A-Za-z0-9]{10,200}$/.test(sessionId)) query = query.eq("stripe_session_id", sessionId);
@@ -38,6 +38,8 @@ Deno.serve(async (req) => {
   if (!data) return json(req, { error: "Not found" }, 404);
 
   data.tickets.sort((a, b) => a.guest_number - b.guest_number);
+  // A mixed-ticket order names each pass for its own ticket type. Older orders have no items.
+  const names = new Map((data.order_items ?? []).map((item: { tier_id: string; display_name_snapshot: string }) => [item.tier_id, item.display_name_snapshot]));
   return json(req, {
     event_id: data.event_id,
     tier_name: data.tier_name,
@@ -46,6 +48,7 @@ Deno.serve(async (req) => {
     access_token: data.access_token,
     tickets: data.tickets.map((ticket) => ({
       guest_number: ticket.guest_number,
+      tier_name: names.get(ticket.tier_id) ?? data.tier_name,
       token: ticket.token,
       status: ticket.status,
       checked_in_at: ticket.checked_in_at,

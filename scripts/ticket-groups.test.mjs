@@ -51,7 +51,10 @@ test("every tier and quantity produces the exact number of individual passes", (
 });
 
 test("browser and server enforce quantity limits independently", () => {
-  assert.match(checkoutSource, /Math\.min\(tier\?\.maxPerOrder \?\? 10, 10\)/);
+  const cartLib = readFileSync(new URL("../src/lib/cart.ts", import.meta.url), "utf8");
+  assert.match(cartLib, /Math\.min\(tier\.maxPerOrder \?\? DEFAULT_MAX_PER_LINE, DEFAULT_MAX_PER_LINE\)/);
+  assert.match(cartLib, /MAX_CART_ADMISSIONS = 20/);
+  assert.match(checkoutSource, /canIncrease\(/);
   assert.match(checkoutFunction, /quantity > 20/);
   assert.match(checkoutFunction, /quantity > tier\.max_per_order/);
   assert.match(fulfilment, /p_quantity > least\(v_tier\.max_per_order, 20\)/);

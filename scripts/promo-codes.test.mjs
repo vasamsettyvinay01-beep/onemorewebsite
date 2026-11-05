@@ -199,10 +199,10 @@ test("the checkout clears a promo the server rejects for the newly selected tick
   assert.match(checkoutView, /PROMO_NOT_ELIGIBLE/);
   assert.match(checkoutView, /function promoRejectionMessage/);
   assert.match(checkoutView, /setPromoCode\(null\)/);
-  assert.match(checkoutView, /\$\{tier\?\.id\}:\$\{qty\}:\$\{promoCode/);
+  // The quote is keyed by the whole cart plus the code, so any cart change re-evaluates the code.
+  assert.match(checkoutView, /const quoteKey = `\$\{key\}\|\$\{promoCode/);
   assert.match(checkoutView, /quote\?\.key === quoteKey \? quote : null/);
-  assert.match(checkoutView, /tierId: tier!\.id/);
-  assert.match(checkoutView, /promoCode: entered/);
+  assert.match(checkoutView, /requestBody\(event\.id, items, \{ quote: true, promoCode: entered \}\)/);
 });
 
 test("vip invitations and complimentary admissions have no promo relationship", () => {
@@ -323,9 +323,9 @@ test("promo performance is super admin only and reads the order snapshot", () =>
   assert.match(adminFn, /summary\.discounts \+= order\.discount_amount_cents/);
   assert.match(adminFn, /order\.status === "refunded"/);
   assert.match(adminFn, /summary\.netRevenue = summary\.grossSales - summary\.refunds - summary\.disputed/);
-  assert.match(adminFn, /admissionCounts\(/);
+  assert.match(adminFn, /promoAdmissionCounts\(/);
   assert.match(promoPanel, /"promo_report"/);
-  assert.match(promoPanel, /Admission tickets via/);
+  assert.match(promoPanel, /Discounted admissions via/);
   assert.match(promoPanel, /Orders using/);
 });
 
@@ -346,7 +346,7 @@ test("the customer sees the promo, and only promo orders get a receipt block", (
   assert.match(checkoutView, /% off/);
   assert.match(checkoutView, /"PROMO CODE NOT VALID"/);
   assert.doesNotMatch(checkoutView, /percentDiscount|\* 0\.15|\* 15/);
-  assert.match(orderEmail, /const receipt = promoted/);
+  assert.match(orderEmail, /: promoted\s*\?/);
   assert.match(passEmail, /if \(!receipt\) return "";/);
 });
 

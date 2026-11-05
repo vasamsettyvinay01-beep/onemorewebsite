@@ -254,6 +254,42 @@ function OrderDetailView({ eventId, refCode }: { eventId: string; refCode: strin
               Refund this order
             </Link>
           )}
+          {detail.order.items && detail.order.items.length > 0 && (
+            <section className="rounded-lg border border-white/10 bg-[#171916] p-3" aria-label="Ticket lines">
+              <h2 className="text-sm font-semibold">Ticket lines</h2>
+              <div className="mt-2 overflow-x-auto">
+                <table className="w-full min-w-[40rem] text-left text-sm">
+                  <thead className="text-[0.65rem] uppercase tracking-wide text-white/40">
+                    <tr>
+                      {["Ticket", "Qty", "Admissions", "Unit price", "Line subtotal", "Discount", "After discount", "Tax", "Line total"].map((label) => (
+                        <th key={label} className="py-2 pr-3 font-medium">{label}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {detail.order.items.map((line) => (
+                      <tr key={line.tierId} className="border-t border-white/10">
+                        <td className="py-2 pr-3">{line.name}</td>
+                        <td className="py-2 pr-3 tabular-nums">{line.quantity}</td>
+                        <td className="py-2 pr-3 tabular-nums">{line.admissions}</td>
+                        <td className="py-2 pr-3 tabular-nums">{money(line.unitPrice, detail.order.currency)}</td>
+                        <td className="py-2 pr-3 tabular-nums">{money(line.lineSubtotal, detail.order.currency)}</td>
+                        <td className="py-2 pr-3 tabular-nums">
+                          {line.discount > 0 ? `−${money(line.discount, detail.order.currency)}` : <span className="text-white/35">—</span>}
+                        </td>
+                        <td className="py-2 pr-3 tabular-nums">{money(line.discountedSubtotal, detail.order.currency)}</td>
+                        <td className="py-2 pr-3 tabular-nums">{money(line.tax, detail.order.currency)}</td>
+                        <td className="py-2 pr-3 tabular-nums">{money(line.lineTotal, detail.order.currency)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <p className="mt-2 text-xs text-white/45">
+                Tax is split across lines for reporting; Stripe charged one tax amount on the whole cart. Refunds are for the whole order.
+              </p>
+            </section>
+          )}
           <section className="rounded-lg border border-white/10 bg-[#171916] p-3">
             <h2 className="text-sm font-semibold">Passes</h2>
             {detail.tickets.length === 0 ? (
@@ -265,6 +301,7 @@ function OrderDetailView({ eventId, refCode }: { eventId: string; refCode: strin
                     <tr>
                       <th className="py-2 pr-3 font-medium">Pass</th>
                       <th className="py-2 pr-3 font-medium">Guest</th>
+                      <th className="py-2 pr-3 font-medium">Ticket</th>
                       <th className="py-2 pr-3 font-medium">Status</th>
                       <th className="py-2 font-medium">Checked in</th>
                     </tr>
@@ -274,6 +311,7 @@ function OrderDetailView({ eventId, refCode }: { eventId: string; refCode: strin
                       <tr key={ticket.ref} className="border-t border-white/10">
                         <td className="py-2 pr-3">{ticket.ref}</td>
                         <td className="py-2 pr-3 tabular-nums">{ticket.guestNumber}</td>
+                        <td className="py-2 pr-3">{ticket.tier ?? detail.order.tier}</td>
                         <td className="py-2 pr-3"><Chip tone={toneFor(ticket.status)}>{ticket.status}</Chip></td>
                         <td className="py-2">{when(ticket.checkedInAt)}</td>
                       </tr>

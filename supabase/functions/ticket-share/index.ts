@@ -136,23 +136,26 @@ async function mutate(req: Request, body: Record<string, unknown>, action: "crea
 async function ownedTicket(accessToken: string, guestNumber: number) {
   const { data: order } = await admin
     .from("orders")
-    .select("id, status, event_id, tier_id, purchaser_name, tier_name, tickets(id, guest_number, token, status)")
+    .select("id, status, event_id, tier_id, purchaser_name, tier_name, order_items(tier_id, display_name_snapshot), tickets(id, guest_number, token, status, tier_id)")
     .eq("access_token", accessToken)
     .maybeSingle();
   const ticket = order?.tickets?.find((row: { guest_number: number }) => row.guest_number === guestNumber);
   if (!order || !ticket) return null;
+  // A pass in a mixed-ticket order belongs to its own ticket type; the order's tier_id is "mixed".
+  const ticketTier = (ticket.tier_id as string | null) ?? order.tier_id;
+  const itemName = (order.order_items ?? []).find((item: { tier_id: string }) => item.tier_id === ticketTier)?.display_name_snapshot as string | undefined;
   const { data: tier } = await admin
     .from("tiers")
     .select("metadata")
     .eq("event_id", order.event_id)
-    .eq("tier_id", order.tier_id)
+    .eq("tier_id", ticketTier)
     .maybeSingle();
   const metadata = stringMeta((tier?.metadata ?? {}) as Record<string, unknown>);
   const named = properName(order.purchaser_name);
   return {
     ticketId: ticket.id as string,
     admissionCode: ticket.token as string,
-    tierName: (order.tier_name as string) || "Pass",
+    tierName: itemName || (order.tier_name as string) || "Pass",
     total: order.tickets.length,
     senderName: named?.split(" ")[0] ?? "A guest",
     eventName: metadata.omc_event_name || "One More",
@@ -198,7 +201,7 @@ async function readShare(hash: string) {
   if (!share || share.revoked_at) return null;
   const { data: ticket } = await admin
     .from("tickets")
-    .select("guest_number, token, status, checked_in_at, guest_name, event_id, order_id, orders(status, tier_name, purchaser_name)")
+    .select("guest_number, token, status, tier_id, checked_in_at, guest_name, event_id, order_id, orders(status, tier_name, purchaser_name, order_items(tier_id, display_name_snapshot))")
     .eq("id", share.ticket_id)
     .maybeSingle();
   if (!ticket) return null;
@@ -213,7 +216,7 @@ async function readShare(hash: string) {
     status: ticket.status,
     checkedInAt: ticket.checked_in_at,
     eventId: ticket.event_id,
-    tierName: order?.tier_name ?? "",
+    tierName: order?.order_items?.find((item: { tier_id: string }) => item.tier_id === ticket.tier_id)?.display_name_snapshot ?? order?.tier_name ?? "",
     orderStatus: order?.status ?? "paid",
     total: count ?? 1,
     reference: ticket.token.slice(-6).toUpperCase(),

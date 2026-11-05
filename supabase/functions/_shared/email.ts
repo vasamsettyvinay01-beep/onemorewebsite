@@ -22,10 +22,12 @@ export function readPartners(raw: string | undefined): PassEmail["partners"] {
   }
 }
 
-export type TicketEmail = Omit<PassEmail, "passes" | "ticketsUrl" | "sealUrl"> & {
+export type TicketEmail = Omit<PassEmail, "passes" | "ticketsUrl" | "sealUrl" | "groups"> & {
   to: string;
   accessToken: string;
   tickets: { guest_number: number; token: string }[];
+  /** A mixed-ticket order: the same tickets, grouped by ticket type for the email. */
+  groups?: { tierName: string; tickets: { guest_number: number; token: string }[] }[];
 };
 
 export interface SaleNotification {
@@ -40,6 +42,14 @@ export interface SaleNotification {
   amountTotal: number;
   currency: string;
   promo?: { label: string; originalSubtotal: number; discount: number; tax: number };
+  /** A mixed-ticket order. Replaces the single Pass / Quantity rows with the line items. */
+  cart?: {
+    items: { name: string; quantity: number; admissions: number }[];
+    promoLabel?: string;
+    originalSubtotal: number;
+    discount: number;
+    tax: number;
+  };
 }
 
 const BRAND_ASSETS = `${Deno.env.get("SUPABASE_URL")}/storage/v1/object/public/brand`;
@@ -78,6 +88,10 @@ export async function sendTicketEmail(t: TicketEmail): Promise<void> {
     sealUrl: `${BRAND_ASSETS}/seal.png`,
     ticketsUrl: `${SITE_URL}/tickets/?o=${t.accessToken}`,
     passes: t.tickets.map((ticket) => ({ ...ticket, qrSrc: `cid:pass-${ticket.guest_number}` })),
+    groups: t.groups?.map((group) => ({
+      tierName: group.tierName,
+      passes: group.tickets.map((ticket) => ({ ...ticket, qrSrc: `cid:pass-${ticket.guest_number}` })),
+    })),
   });
 
   const res = await fetch("https://api.resend.com/emails", {
@@ -137,22 +151,36 @@ export async function sendSaleNotification(sale: SaleNotification): Promise<void
 
   const total = money(sale.amountTotal, sale.currency);
   const buyer = sale.purchaserName?.trim() || "Guest";
-  const subject = `New ticket sale — ${sale.quantity} × ${sale.tierName} — ${total}`;
+  const cart = sale.cart;
+  const subject = cart
+    ? `New ticket sale — ${cart.items.map((item) => `${item.name} × ${item.quantity}`).join(", ")} — ${total}`
+    : `New ticket sale — ${sale.quantity} × ${sale.tierName} — ${total}`;
   const rows = [
     ["Event", sale.eventName],
     ["Buyer", buyer],
     ["Email", sale.purchaserEmail],
-    ["Pass", sale.tierName],
-    ["Quantity", String(sale.quantity)],
-    ["Guests admitted", String(sale.guestCount)],
-    ...(sale.promo
+    ...(cart
       ? [
-          ["Promo", sale.promo.label],
-          ["Original subtotal", money(sale.promo.originalSubtotal, sale.currency)],
-          ["Discount", `-${money(sale.promo.discount, sale.currency)}`],
-          ["Tax", money(sale.promo.tax, sale.currency)],
+          ["Items", cart.items.map((item) => `${item.name} × ${item.quantity}`).join("\n")],
+          ["Total admissions", String(sale.guestCount)],
+          ...(cart.promoLabel ? [["Promo", cart.promoLabel]] : []),
+          ["Original subtotal", money(cart.originalSubtotal, sale.currency)],
+          ...(cart.promoLabel ? [["Discount", `-${money(cart.discount, sale.currency)}`]] : []),
+          ["Tax", money(cart.tax, sale.currency)],
         ]
-      : []),
+      : [
+          ["Pass", sale.tierName],
+          ["Quantity", String(sale.quantity)],
+          ["Guests admitted", String(sale.guestCount)],
+          ...(sale.promo
+            ? [
+                ["Promo", sale.promo.label],
+                ["Original subtotal", money(sale.promo.originalSubtotal, sale.currency)],
+                ["Discount", `-${money(sale.promo.discount, sale.currency)}`],
+                ["Tax", money(sale.promo.tax, sale.currency)],
+              ]
+            : []),
+        ]),
     ["Paid", total],
     ["Order", sale.orderId],
     ["Payment", sale.paymentIntentId],
@@ -160,7 +188,7 @@ export async function sendSaleNotification(sale: SaleNotification): Promise<void
   const htmlRows = rows
     .map(
       ([label, value]) =>
-        `<tr><td style="padding:8px 12px;color:#8f8b82;font:600 11px Arial,sans-serif;text-transform:uppercase;letter-spacing:.12em;border-bottom:1px solid #28251f">${esc(label)}</td><td style="padding:8px 12px;color:#eceae4;font:400 14px Arial,sans-serif;border-bottom:1px solid #28251f">${esc(value)}</td></tr>`,
+        `<tr><td style="padding:8px 12px;color:#8f8b82;font:600 11px Arial,sans-serif;text-transform:uppercase;letter-spacing:.12em;border-bottom:1px solid #28251f">${esc(label)}</td><td style="padding:8px 12px;color:#eceae4;font:400 14px Arial,sans-serif;border-bottom:1px solid #28251f">${esc(value).replace(/\n/g, "<br>")}</td></tr>`,
     )
     .join("");
   const text = [`New ticket sale — ${sale.eventName}`, "", ...rows.map(([label, value]) => `${label}: ${value}`)].join("\n");

@@ -10,7 +10,25 @@ import { brand } from "@/data/brand";
 import { PolicyAck } from "@/components/checkout/PolicyAck";
 import { backend, backendConfigured, functionUrl } from "@/data/backend";
 import { useLiveEvent } from "@/lib/availability";
-import { formatChapter, formatEventTime, formatMoney, getEventBySlug, getVisibleTiers, isOnSale, waitingFor } from "@/lib/events";
+import {
+  MAX_CART_ADMISSIONS,
+  NON_PUBLIC_TIER_IDS,
+  admitsOf,
+  canDecrease,
+  canIncrease,
+  cartAdmissions,
+  cartItems,
+  cartKey,
+  cartSelections,
+  clampQuantities,
+  normaliseLines,
+  promoScopeLabel,
+  requestBody,
+  type CartItem,
+  type Quantities,
+  type QuoteLine,
+} from "@/lib/cart";
+import { formatChapter, formatEventTime, getEventBySlug, getVisibleTiers, isOnSale, waitingFor } from "@/lib/events";
 import { useNightOver } from "@/lib/use-night-over";
 import { cn } from "@/lib/cn";
 import type { OneMoreEvent, TicketTier } from "@/types/event";
@@ -26,7 +44,8 @@ interface Quote {
   discountedSubtotal: number;
   tax: number;
   total: number;
-  promo: { code: string; percent: number } | null;
+  lines: QuoteLine[];
+  promo: { code: string; percent: number; eligibleNames: string[] } | null;
 }
 
 function exactMoney(cents: number, currency: string): string {
@@ -42,9 +61,24 @@ function promoRejectionMessage(status: number, body: unknown): string | null {
   return null;
 }
 
-function readQuote(key: string, body: Record<string, unknown>): Quote | null {
+interface SingleTicket {
+  id: string;
+  name: string;
+  unitCents: number;
+  quantity: number;
+  admits: number;
+}
+
+function readQuote(key: string, body: Record<string, unknown>, single: SingleTicket | null): Quote | null {
   if (typeof body.total !== "number" || typeof body.tax !== "number" || typeof body.subtotal !== "number") return null;
-  const promo = body.promo as { code?: unknown; percent?: unknown } | null | undefined;
+  const lines = normaliseLines(body, single);
+  if (!lines) return null;
+  const promo = body.promo as { code?: unknown; percent?: unknown; eligibleNames?: unknown } | null | undefined;
+  let scope: string[] = lines.filter((line) => line.discount > 0).map((line) => line.name);
+  if (promo && Array.isArray(promo.eligibleNames)) {
+    const named = promo.eligibleNames.filter((value): value is string => typeof value === "string");
+    if (named.length > 0) scope = named;
+  }
   return {
     key,
     subtotal: body.subtotal,
@@ -52,7 +86,8 @@ function readQuote(key: string, body: Record<string, unknown>): Quote | null {
     discountedSubtotal: typeof body.discountedSubtotal === "number" ? body.discountedSubtotal : body.subtotal,
     tax: body.tax,
     total: body.total,
-    promo: promo && typeof promo.code === "string" && typeof promo.percent === "number" ? { code: promo.code, percent: promo.percent } : null,
+    lines,
+    promo: promo && typeof promo.code === "string" && typeof promo.percent === "number" ? { code: promo.code, percent: promo.percent, eligibleNames: scope } : null,
   };
 }
 
@@ -125,13 +160,8 @@ export function CheckoutView() {
 
   return (
     <main className="fixed inset-0 overflow-y-auto bg-rich text-ivory">
-      <div
-        className={cn(
-          "mx-auto flex min-h-full w-full items-center px-5 py-4 sm:px-8",
-          params.get("tier") ? "max-w-xl" : "max-w-5xl",
-        )}
-      >
-        <div className="flex w-full flex-col">
+      <div className="mx-auto flex min-h-full w-full max-w-5xl items-center px-5 py-4 sm:px-8">
+        <div className="flex w-full min-w-0 flex-col">
           <header className="shrink-0">
             <Link href="/" aria-label={brand.name} className="inline-flex">
               {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -188,13 +218,19 @@ function CheckoutCard({ event, initialTier }: { event: OneMoreEvent; initialTier
   const router = useRouter();
   const stripe = useStripe();
   const elements = useElements();
-  const tiers = getVisibleTiers(event).filter((t) => !t.priceOnRequest);
+  // Public, fixed-price passes only. The server rejects anything else regardless of what is shown.
+  const tiers = getVisibleTiers(event).filter((t) => !t.priceOnRequest && !NON_PUBLIC_TIER_IDS.includes(t.id.toLowerCase()));
   const buyable = tiers.filter((t) => !t.soldOut && !t.unavailable && !waitingFor(event, t));
-  const chosen = buyable.find((t) => t.id === initialTier);
-  const [tierId, setTierId] = useState(chosen?.id ?? "");
-  const tier: TicketTier | undefined = chosen ?? buyable.find((t) => t.id === tierId) ?? [...buyable].sort((a, b) => a.priceCents - b.priceCents)[0];
-  const locked = !!chosen;
-  const [quantity, setQuantity] = useState(1);
+  // Tickets start at none. A ticket chosen on the previous sheet arrives as a single ticket.
+  const [picked, setPicked] = useState<Quantities>(() => (initialTier && buyable.some((t) => t.id === initialTier) ? { [initialTier]: 1 } : {}));
+  const quantities = clampQuantities(buyable, picked);
+  const items = cartItems(buyable, quantities);
+  const itemsJson = JSON.stringify(items);
+  const key = cartKey(items);
+  const admissions = cartAdmissions(buyable, quantities);
+  const selections = cartSelections(buyable, quantities);
+  const currency = buyable[0]?.currency ?? "USD";
+
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [busy, setBusy] = useState(false);
@@ -204,60 +240,100 @@ function CheckoutCard({ event, initialTier }: { event: OneMoreEvent; initialTier
   const phase = useRef<"idle" | "wallet" | "paying">("idle");
   const idempotencyKey = useRef<string | null>(null);
   const attempt = useRef("");
+  const detailsRef = useRef<HTMLDivElement>(null);
+  const [detailsInView, setDetailsInView] = useState(false);
 
   const [quote, setQuote] = useState<Quote | null>(null);
+  const [quoteError, setQuoteError] = useState<{ key: string; message: string } | null>(null);
   const [promoDraft, setPromoDraft] = useState("");
   const [promoCode, setPromoCode] = useState<string | null>(null);
   const [promoError, setPromoError] = useState<string | null>(null);
   const [promoBusy, setPromoBusy] = useState(false);
 
-  const maxQty = Math.min(tier?.maxPerOrder ?? 10, 10);
-  const qty = Math.min(quantity, maxQty);
-  const subtotal = (tier?.priceCents ?? 0) * qty;
-  const quoteKey = `${tier?.id}:${qty}:${promoCode ?? ""}`;
+  const quoteKey = `${key}|${promoCode ?? ""}`;
   const priced = quote?.key === quoteKey ? quote : null;
-  const total = priced?.total ?? subtotal;
+  const shownError = quoteError?.key === quoteKey ? quoteError.message : null;
+  const localSubtotal = items.reduce((sum, item) => sum + (buyable.find((t) => t.id === item.ticket_type)?.priceCents ?? 0) * item.quantity, 0);
+  const total = priced?.total ?? localSubtotal;
+
+  // A cart of one ticket type is rebuilt from the single-ticket response, which has no lines.
+  const only = items.length === 1 ? buyable.find((t) => t.id === items[0].ticket_type) : undefined;
+  const singleJson = JSON.stringify(
+    only ? ({ id: only.id, name: only.name, unitCents: only.priceCents, quantity: items[0].quantity, admits: admitsOf(only) } satisfies SingleTicket) : null,
+  );
 
   useEffect(() => {
-    if (!tier || quote?.key === quoteKey) return;
+    if (items.length === 0 || quote?.key === quoteKey) return;
     let stale = false;
-    fetch(functionUrl("checkout"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ eventId: event.id, tierId: tier.id, quantity: qty, quote: true, ...(promoCode ? { promoCode } : {}) }),
-    })
-      .then(async (res) => {
-        const body = await res.json().catch(() => null);
-        if (stale) return;
-        const rejected = promoRejectionMessage(res.status, body);
-        if (rejected) {
-          setPromoCode(null);
-          setPromoError(rejected);
-          return;
-        }
-        const next = res.ok && body ? readQuote(quoteKey, body) : null;
-        if (next) setQuote(next);
+    const parsed = JSON.parse(itemsJson) as CartItem[];
+    const single = JSON.parse(singleJson) as SingleTicket | null;
+    // Wait for the guest to stop tapping so a run of changes is one quote.
+    const timer = setTimeout(() => {
+      fetch(functionUrl("checkout"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(requestBody(event.id, parsed, { quote: true, ...(promoCode ? { promoCode } : {}) })),
       })
-      .catch(() => {});
+        .then(async (res) => {
+          const body = await res.json().catch(() => null);
+          if (stale) return;
+          const rejected = promoRejectionMessage(res.status, body);
+          if (rejected) {
+            // The code no longer fits this cart. Drop it; the cart goes back to full price.
+            setPromoCode(null);
+            setPromoError(rejected);
+            return;
+          }
+          const next = res.ok && body ? readQuote(quoteKey, body, single) : null;
+          if (next) {
+            setQuote(next);
+            setQuoteError(null);
+          } else if (!res.ok && body && typeof body.error === "string") {
+            setQuoteError({ key: quoteKey, message: body.error });
+          }
+        })
+        .catch(() => {});
+    }, 300);
     return () => {
       stale = true;
+      clearTimeout(timer);
     };
-  }, [event.id, tier, qty, quoteKey, promoCode, quote?.key]);
+  }, [event.id, itemsJson, singleJson, quoteKey, promoCode, quote?.key, items.length]);
 
   useEffect(() => {
     if (total > 0) elements?.update({ amount: total });
   }, [elements, total]);
 
-  if (!tier) return <SoldOutCard />;
+  useEffect(() => {
+    const node = detailsRef.current;
+    if (!node || typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver(([entry]) => setDetailsInView(entry.isIntersecting), { threshold: 0.15 });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
 
-  const admits = (tier.admits ?? 1) * qty;
-  const totalLabel = formatMoney(total, tier.currency);
+  if (tiers.length === 0 || buyable.length === 0) return <SoldOutCard />;
+
+  const totalLabel = exactMoney(total, currency);
   const valid = name.trim().length > 1 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
+  const ready = items.length > 0 && !!priced;
+
+  function change(tier: TicketTier, delta: 1 | -1) {
+    if (busy) return;
+    if (delta > 0 && !canIncrease(buyable, quantities, tier)) return;
+    if (delta < 0 && !canDecrease(quantities, tier)) return;
+    setError(null);
+    setPicked({ ...quantities, [tier.id]: (quantities[tier.id] ?? 0) + delta });
+  }
 
   async function applyPromo() {
     const entered = promoDraft.trim();
     if (!entered || promoBusy || busy) {
       if (!entered) setPromoError(PROMO_INVALID);
+      return;
+    }
+    if (items.length === 0) {
+      setPromoError("Add tickets, then apply your code.");
       return;
     }
     setPromoBusy(true);
@@ -266,11 +342,12 @@ function CheckoutCard({ event, initialTier }: { event: OneMoreEvent; initialTier
       const res = await fetch(functionUrl("checkout"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ eventId: event.id, tierId: tier!.id, quantity: qty, quote: true, promoCode: entered }),
+        body: JSON.stringify(requestBody(event.id, items, { quote: true, promoCode: entered })),
       });
       const body = await res.json().catch(() => ({}));
       const applied = res.ok && body?.promo?.code ? String(body.promo.code) : null;
-      const next = applied ? readQuote(`${tier!.id}:${qty}:${applied}`, body) : null;
+      const single = only ? { id: only.id, name: only.name, unitCents: only.priceCents, quantity: items[0].quantity, admits: admitsOf(only) } : null;
+      const next = applied ? readQuote(`${key}|${applied}`, body, single) : null;
       const rejected = promoRejectionMessage(res.status, body);
       if (applied && next) {
         setQuote(next);
@@ -298,7 +375,7 @@ function CheckoutCard({ event, initialTier }: { event: OneMoreEvent; initialTier
   }
 
   function paymentKey(buyerEmail: string) {
-    const next = `${tier!.id}:${qty}:${promoCode ?? ""}:${buyerEmail.trim().toLowerCase()}`;
+    const next = `${key}|${promoCode ?? ""}|${buyerEmail.trim().toLowerCase()}`;
     if (attempt.current !== next || !idempotencyKey.current) {
       attempt.current = next;
       idempotencyKey.current = crypto.randomUUID();
@@ -306,11 +383,11 @@ function CheckoutCard({ event, initialTier }: { event: OneMoreEvent; initialTier
     return idempotencyKey.current;
   }
 
-  async function releaseHold(key: string) {
+  async function releaseHold(holdKey: string) {
     await fetch(functionUrl("checkout"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ release: true, idempotencyKey: key }),
+      body: JSON.stringify({ release: true, idempotencyKey: holdKey }),
     }).catch(() => {});
   }
 
@@ -318,14 +395,13 @@ function CheckoutCard({ event, initialTier }: { event: OneMoreEvent; initialTier
     const res = await fetch(functionUrl("checkout"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        eventId: event.id,
-        tierId: tier!.id,
-        quantity: qty,
-        idempotencyKey: paymentKey(buyer.email),
-        ...(promoCode ? { promoCode } : {}),
-        ...buyer,
-      }),
+      body: JSON.stringify(
+        requestBody(event.id, items, {
+          idempotencyKey: paymentKey(buyer.email),
+          ...(promoCode ? { promoCode } : {}),
+          ...buyer,
+        }),
+      ),
     });
     const body = await res.json().catch(() => ({}));
     const rejected = promoRejectionMessage(res.status, body);
@@ -368,13 +444,13 @@ function CheckoutCard({ event, initialTier }: { event: OneMoreEvent; initialTier
     phase.current = "paying";
     setBusy(true);
     setError(null);
-    const key = paymentKey(email);
+    const holdKey = paymentKey(email);
     try {
       const { error: fieldError } = await elements.submit();
       if (fieldError) throw new Error(fieldError.message);
       await confirm({ name: name.trim(), email: email.trim() });
     } catch (err) {
-      await releaseHold(key);
+      await releaseHold(holdKey);
       idempotencyKey.current = null;
       phase.current = "idle";
       setError((err as Error).message);
@@ -397,10 +473,10 @@ function CheckoutCard({ event, initialTier }: { event: OneMoreEvent; initialTier
     e.resolve({
       emailRequired: true,
       lineItems: [
-        {
-          name: `${event.name} · ${tier!.name} × ${qty}${priced.promo ? ` (${priced.promo.code} −${priced.promo.percent}%)` : ""}`,
-          amount: priced.discountedSubtotal,
-        },
+        ...priced.lines.map((line) => ({
+          name: `${line.name} × ${line.quantity}${line.discount > 0 && priced.promo ? ` (${priced.promo.code} −${priced.promo.percent}%)` : ""}`,
+          amount: line.discountedSubtotal,
+        })),
         { name: "Sales tax", amount: priced.tax },
       ],
     });
@@ -418,7 +494,7 @@ function CheckoutCard({ event, initialTier }: { event: OneMoreEvent; initialTier
     phase.current = "paying";
     setBusy(true);
     const buyerEmail = e.billingDetails?.email?.trim() || email.trim();
-    const key = paymentKey(buyerEmail);
+    const holdKey = paymentKey(buyerEmail);
     try {
       const { error: submitError } = await elements.submit();
       if (submitError) throw new Error(submitError.message);
@@ -427,7 +503,7 @@ function CheckoutCard({ event, initialTier }: { event: OneMoreEvent; initialTier
         email: buyerEmail,
       });
     } catch (err) {
-      await releaseHold(key);
+      await releaseHold(holdKey);
       idempotencyKey.current = null;
       phase.current = "idle";
       e.paymentFailed({ reason: "fail" });
@@ -436,182 +512,212 @@ function CheckoutCard({ event, initialTier }: { event: OneMoreEvent; initialTier
     }
   }
 
+  function continueToDetails() {
+    detailsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
   const field =
     "h-10 w-full rounded-[2px] border border-ivory/15 bg-white/[0.03] px-3 text-sm text-ivory placeholder:text-ivory/30 transition-colors hover:border-gold/40 focus:border-gold focus:outline-none";
 
   const label = "mb-1.5 block text-[0.62rem] font-semibold uppercase tracking-[0.16em] text-ivory/50";
 
+  const atLimit = admissions >= MAX_CART_ADMISSIONS;
+  const promoScope = priced?.promo ? promoScopeLabel(priced.promo.eligibleNames) : "";
+  const lineFor = (id: string) => priced?.lines.find((line) => line.ticket_type === id);
+
   return (
-    <form onSubmit={payByCard} noValidate className="relative flex flex-col">
+    <form onSubmit={payByCard} noValidate className="relative flex min-w-0 flex-col">
       <div className="relative px-1 pt-2">
-        <div className={cn("grid items-start gap-4", !locked && "lg:grid-cols-2 lg:gap-x-12")}>
-          <div>
-            {locked ? (
-              <div className="flex items-end justify-between gap-4 border-y border-ivory/10 py-3">
-                <span>
-                  <span className="eyebrow text-ivory/45">Your pass</span>
-                  <span className="mt-1 block text-sm uppercase tracking-[0.18em]">{tier.name}</span>
-                  <span className="mt-0.5 block text-[0.68rem] text-ivory/45">
-                    {(tier.admits ?? 1) > 1 ? `Admits ${tier.admits}` : "Admits one"}
-                  </span>
-                </span>
-                <span className="font-display text-[1.7rem] leading-none">{formatMoney(tier.priceCents, tier.currency)}</span>
-              </div>
-            ) : (
-            <div role="radiogroup" aria-label="Admission" className="divide-y divide-ivory/10 border-y border-ivory/10">
+        <div className="grid items-start gap-5 lg:grid-cols-2 lg:gap-x-12">
+          <div className="min-w-0">
+            <p className="eyebrow text-ivory/45">Choose your tickets</p>
+            <ul aria-label="Tickets" className="mt-2 divide-y divide-ivory/10 border-y border-ivory/10">
               {tiers.map((t) => {
-                const selected = t.id === tier.id;
-                const gone = !!t.soldOut || !!t.unavailable;
+                const gone = !!t.soldOut;
                 const opensAfter = waitingFor(event, t);
-                const closed = gone || !!opensAfter;
+                const unavailable = !gone && !!t.unavailable;
+                const closed = gone || unavailable || !!opensAfter;
+                const qty = quantities[t.id] ?? 0;
+                const admits = admitsOf(t);
                 return (
-                  <button
-                    key={t.id}
-                    type="button"
-                    role="radio"
-                    aria-checked={selected}
-                    disabled={closed || busy}
-                    onClick={() => setTierId(t.id)}
-                    className={cn(
-                      "flex w-full items-center justify-between gap-3 px-1 py-2 text-left transition-colors sm:py-2.5",
-                      selected ? "bg-gold/10" : "hover:bg-white/[0.03]",
-                      closed && "cursor-not-allowed opacity-40",
-                    )}
-                  >
-                    <span className="flex min-w-0 items-center gap-3">
-                      <span
-                        aria-hidden
-                        className={cn(
-                          "flex size-3.5 shrink-0 items-center justify-center rounded-full border",
-                          selected ? "border-gold" : "border-ivory/25",
-                        )}
-                      >
-                        {selected && <span className="size-1.5 rounded-full bg-gold" />}
-                      </span>
-                      <span className="truncate text-[0.62rem] font-semibold uppercase tracking-[0.16em] sm:text-[0.68rem]">
-                        {t.name}
-                        <span className="ml-2 font-normal tracking-[0.12em] text-ivory/40">
-                          {gone ? "Sold out" : opensAfter ? `After ${opensAfter}` : (t.admits ?? 1) > 1 ? `Admits ${t.admits}` : "Admits one"}
+                  <li key={t.id} className={cn("flex items-center justify-between gap-3 py-2.5", closed && "opacity-60")}>
+                    <div className="min-w-0">
+                      <p className="break-words text-[0.7rem] font-semibold uppercase tracking-[0.16em]">{t.name}</p>
+                      <p className="mt-0.5 text-[0.66rem] uppercase tracking-[0.12em] text-ivory/50">
+                        <span className={cn("text-[0.95rem] normal-case tracking-normal text-ivory", gone && "text-ivory/35 line-through")}>
+                          {exactMoney(t.priceCents, t.currency)}
                         </span>
+                        <span className="ml-2">{admits > 1 ? `Admits ${admits}` : "Admits one"}</span>
+                      </p>
+                    </div>
+                    {closed ? (
+                      <span className="shrink-0 text-[0.62rem] font-semibold uppercase tracking-[0.18em] text-ivory/55">
+                        {gone ? "Sold out" : unavailable ? "Unavailable" : `After ${opensAfter}`}
                       </span>
-                    </span>
-                    <span className={cn("shrink-0 font-display text-[1.15rem] leading-none sm:text-[1.25rem]", gone && "text-ivory/35 line-through")}>
-                      {formatMoney(t.priceCents, t.currency)}
-                    </span>
-                  </button>
+                    ) : (
+                      <div role="group" aria-label={`${t.name} quantity`} className="flex shrink-0 items-center">
+                        <Stepper
+                          label={`Decrease ${t.name} quantity`}
+                          disabled={!canDecrease(quantities, t) || busy}
+                          onClick={() => change(t, -1)}
+                        >
+                          −
+                        </Stepper>
+                        <span aria-live="polite" aria-atomic="true" className="w-8 text-center font-display text-[1.35rem] leading-none tabular-nums">
+                          {qty}
+                        </span>
+                        <Stepper
+                          label={`Increase ${t.name} quantity`}
+                          disabled={!canIncrease(buyable, quantities, t) || busy}
+                          onClick={() => change(t, 1)}
+                        >
+                          +
+                        </Stepper>
+                      </div>
+                    )}
+                  </li>
                 );
               })}
-            </div>
+            </ul>
+            {atLimit && (
+              <p className="mt-2 text-[0.68rem] text-ivory/50">Up to {MAX_CART_ADMISSIONS} admissions per booking.</p>
             )}
 
-            <div className="mt-2 flex items-center justify-between">
-              <span>
-                <span className="eyebrow text-ivory/45">Quantity</span>
-                <span className="mt-0.5 block text-[0.72rem] text-ivory/50">
-                  {admits} {admits === 1 ? "guest" : "guests"}
-                </span>
-              </span>
-              <div className="flex items-center gap-3">
-                <Stepper label="Fewer" disabled={qty <= 1 || busy} onClick={() => setQuantity(Math.max(1, qty - 1))}>
-                  −
-                </Stepper>
-                <span aria-live="polite" className="w-5 text-center font-display text-[1.35rem] leading-none">
-                  {qty}
-                </span>
-                <Stepper label="More" disabled={qty >= maxQty || busy} onClick={() => setQuantity(Math.min(maxQty, qty + 1))}>
-                  +
-                </Stepper>
-              </div>
-            </div>
-
-            <div className="mt-3 border-t border-ivory/10 pt-3">
-              {promoCode ? (
-                <div className="flex items-center justify-between gap-3">
-                  <span aria-live="polite">
-                    <span className="block text-[0.68rem] font-semibold uppercase tracking-[0.16em] text-gold">{promoCode} applied ✓</span>
-                    <span className="mt-0.5 block text-[0.62rem] uppercase tracking-[0.16em] text-ivory/50">
-                      {priced?.promo ? `${priced.promo.percent}% off` : "Updating…"}
-                    </span>
-                  </span>
-                  <button
-                    type="button"
-                    onClick={removePromo}
-                    disabled={busy}
-                    className="-my-2 -mr-2 min-h-11 px-2 text-[0.6rem] font-semibold uppercase tracking-[0.18em] text-ivory/55 underline-offset-4 transition-colors hover:text-ivory hover:underline disabled:opacity-40"
-                  >
-                    Remove
-                  </button>
-                </div>
+            <section aria-label="Your tickets" className="mt-5">
+              <p className="eyebrow text-ivory/45">Your tickets</p>
+              {items.length === 0 ? (
+                <p className="mt-2 border-y border-ivory/10 py-4 text-[0.78rem] text-ivory/50">
+                  Choose at least one ticket to continue.
+                </p>
               ) : (
-                <div>
-                  <label htmlFor="promo-code" className={label}>Promo code</label>
-                  <div className="flex gap-2">
-                    <input
-                      id="promo-code"
-                      className={cn(field, "uppercase placeholder:normal-case")}
-                      value={promoDraft}
-                      onChange={(e) => {
-                        setPromoDraft(e.target.value);
-                        if (promoError) setPromoError(null);
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          e.preventDefault();
-                          void applyPromo();
-                        }
-                      }}
-                      placeholder="Enter promo code"
-                      autoComplete="off"
-                      autoCapitalize="characters"
-                      spellCheck={false}
-                      maxLength={40}
-                      disabled={busy || promoBusy}
-                      aria-invalid={!!promoError}
-                      aria-describedby={promoError ? "promo-error" : undefined}
-                    />
+                <ul className="mt-2 divide-y divide-ivory/10 border-y border-ivory/10">
+                  {items.map((item) => {
+                    const t = buyable.find((tier) => tier.id === item.ticket_type)!;
+                    const line = lineFor(item.ticket_type);
+                    const lineTotal = line?.lineSubtotal ?? t.priceCents * item.quantity;
+                    return (
+                      <li key={item.ticket_type} className="flex items-start justify-between gap-3 py-2 text-[0.82rem]">
+                        <span className="min-w-0 break-words">
+                          {t.name} × {item.quantity}
+                          {line && line.discount > 0 && priced?.promo && (
+                            <span className="block text-[0.64rem] uppercase tracking-[0.12em] text-gold">
+                              {priced.promo.code} −{priced.promo.percent}% · −{exactMoney(line.discount, currency)}
+                            </span>
+                          )}
+                        </span>
+                        <span className="shrink-0 tabular-nums">{exactMoney(lineTotal, currency)}</span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+
+              <div className="mt-3">
+                {promoCode ? (
+                  <div className="flex items-center justify-between gap-3">
+                    <span aria-live="polite">
+                      <span className="block text-[0.68rem] font-semibold uppercase tracking-[0.16em] text-gold">{promoCode} applied ✓</span>
+                      <span className="mt-0.5 block text-[0.62rem] uppercase tracking-[0.16em] text-ivory/60">
+                        {priced?.promo ? `${priced.promo.percent}% off ${promoScope}` : items.length ? "Updating…" : "Add tickets to apply"}
+                      </span>
+                    </span>
                     <button
                       type="button"
-                      onClick={() => void applyPromo()}
-                      disabled={busy || promoBusy || !promoDraft.trim()}
-                      className="h-10 shrink-0 rounded-[2px] border border-gold/70 px-4 text-[0.62rem] font-semibold uppercase tracking-[0.18em] text-gold transition-colors hover:bg-gold hover:text-rich disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-gold"
+                      onClick={removePromo}
+                      disabled={busy}
+                      className="-my-2 -mr-2 min-h-11 px-2 text-[0.6rem] font-semibold uppercase tracking-[0.18em] text-ivory/55 underline-offset-4 transition-colors hover:text-ivory hover:underline disabled:opacity-40"
                     >
-                      {promoBusy ? "…" : "Apply"}
+                      Remove
                     </button>
                   </div>
-                  {promoError && (
-                    <p id="promo-error" role="alert" className="mt-1.5 text-[0.62rem] font-semibold uppercase tracking-[0.16em] text-[#E7A598]">
-                      {promoError}
-                    </p>
-                  )}
-                </div>
-              )}
-            </div>
+                ) : (
+                  <div>
+                    <label htmlFor="promo-code" className={label}>Promo code</label>
+                    <div className="flex gap-2">
+                      <input
+                        id="promo-code"
+                        className={cn(field, "min-w-0 uppercase placeholder:normal-case")}
+                        value={promoDraft}
+                        onChange={(e) => {
+                          setPromoDraft(e.target.value);
+                          if (promoError) setPromoError(null);
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            void applyPromo();
+                          }
+                        }}
+                        placeholder="Enter promo code"
+                        autoComplete="off"
+                        autoCapitalize="characters"
+                        spellCheck={false}
+                        maxLength={40}
+                        disabled={busy || promoBusy}
+                        aria-invalid={!!promoError}
+                        aria-describedby={promoError ? "promo-error" : undefined}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => void applyPromo()}
+                        disabled={busy || promoBusy || !promoDraft.trim()}
+                        className="h-10 shrink-0 rounded-[2px] border border-gold/70 px-4 text-[0.62rem] font-semibold uppercase tracking-[0.18em] text-gold transition-colors hover:bg-gold hover:text-rich disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-gold"
+                      >
+                        {promoBusy ? "…" : "Apply"}
+                      </button>
+                    </div>
+                    {promoError && (
+                      <p id="promo-error" role="alert" className="mt-1.5 text-[0.62rem] font-semibold uppercase tracking-[0.16em] text-[#E7A598]">
+                        {promoError}
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
 
-            {priced?.promo && (
-              <>
-                <p className="mt-2 flex items-center justify-between text-[0.72rem] text-ivory/50">
-                  <span className="eyebrow text-ivory/45">Ticket subtotal</span>
-                  <span>{exactMoney(priced.subtotal, tier.currency)}</span>
+              {shownError && (
+                <p role="alert" className="mt-3 border border-[#E7A598]/40 px-3 py-2 text-[0.75rem] text-[#E7A598]">
+                  {shownError}
                 </p>
-                <p className="mt-1 flex items-center justify-between text-[0.72rem] text-gold">
-                  <span className="eyebrow">{priced.promo.code} — {priced.promo.percent}% off</span>
-                  <span>−{exactMoney(priced.discount, tier.currency)}</span>
-                </p>
-              </>
-            )}
-            <p className={cn("flex items-center justify-between text-[0.72rem] text-ivory/50", priced?.promo ? "mt-1" : "mt-2")}>
-              <span className="eyebrow text-ivory/45">Sales tax</span>
-              <span>{priced ? (priced.promo ? exactMoney : formatMoney)(priced.tax, tier.currency) : "Calculating…"}</span>
-            </p>
-            {priced?.promo && (
-              <p className="mt-2 flex items-center justify-between border-t border-ivory/10 pt-2 text-[0.8rem] text-ivory">
-                <span className="eyebrow text-ivory/70">Total</span>
-                <span className="font-display text-[1.25rem] leading-none">{exactMoney(priced.total, tier.currency)}</span>
-              </p>
-            )}
+              )}
+
+              {items.length > 0 && (
+                <dl className="mt-3 space-y-1 text-[0.72rem] text-ivory/60">
+                  <div className="flex items-center justify-between gap-3">
+                    <dt className="eyebrow text-ivory/45">Original subtotal</dt>
+                    <dd className="tabular-nums">{exactMoney(priced?.subtotal ?? localSubtotal, currency)}</dd>
+                  </div>
+                  {priced?.promo && priced.discount > 0 && (
+                    <>
+                      <div className="flex items-start justify-between gap-3 text-gold">
+                        <dt className="min-w-0">
+                          <span className="eyebrow block">Eligible ticket discount</span>
+                          <span className="block text-[0.6rem] uppercase tracking-[0.12em] opacity-80">
+                            {priced.promo.code} · {priced.promo.percent}% off {promoScope}
+                          </span>
+                        </dt>
+                        <dd className="shrink-0 tabular-nums">−{exactMoney(priced.discount, currency)}</dd>
+                      </div>
+                      <div className="flex items-center justify-between gap-3">
+                        <dt className="eyebrow text-ivory/45">Discounted subtotal</dt>
+                        <dd className="tabular-nums">{exactMoney(priced.discountedSubtotal, currency)}</dd>
+                      </div>
+                    </>
+                  )}
+                  <div className="flex items-center justify-between gap-3">
+                    <dt className="eyebrow text-ivory/45">Sales tax</dt>
+                    <dd className="tabular-nums">{priced ? exactMoney(priced.tax, currency) : "Calculating…"}</dd>
+                  </div>
+                  <div className="flex items-center justify-between gap-3 border-t border-ivory/10 pt-2 text-[0.8rem] text-ivory">
+                    <dt className="eyebrow text-ivory/70">Total</dt>
+                    <dd className="font-display text-[1.25rem] leading-none tabular-nums">{priced ? exactMoney(priced.total, currency) : "—"}</dd>
+                  </div>
+                </dl>
+              )}
+            </section>
           </div>
 
-          <div className={cn(!locked && "lg:border-l lg:border-ivory/10 lg:pl-10")}>
+          <div ref={detailsRef} className="min-w-0 scroll-mt-4 lg:border-l lg:border-ivory/10 lg:pl-10">
             <div className={cn(express && "mb-3")}>
               <ExpressCheckoutElement
                 onReady={({ availablePaymentMethods }) =>
@@ -671,24 +777,47 @@ function CheckoutCard({ event, initialTier }: { event: OneMoreEvent; initialTier
                 {error}
               </p>
             )}
+
+            <div className="mt-4">
+              <button
+                type="submit"
+                disabled={!stripe || busy || !ready || !agreed}
+                className="h-12 w-full rounded-[2px] bg-gold text-[0.68rem] font-semibold uppercase tracking-[0.18em] text-rich transition-colors duration-500 hover:bg-gold-soft disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {busy ? "Securing your passes…" : items.length === 0 ? "Choose tickets to continue" : `Book · ${totalLabel}`}
+              </button>
+              <PolicyAck agreed={agreed} onChange={setAgreed} />
+            </div>
           </div>
         </div>
       </div>
 
-      <div className={cn("relative shrink-0 px-1 pt-2", !locked && "grid gap-4 lg:grid-cols-2 lg:gap-x-12")}>
-        {!locked && <div className="hidden lg:block" />}
-        <div className={cn(!locked && "lg:pl-10")}>
-          <button
-            type="submit"
-            disabled={!stripe || busy || !priced || !agreed}
-            className="h-12 w-full rounded-[2px] bg-gold text-[0.68rem] font-semibold uppercase tracking-[0.18em] text-rich transition-colors duration-500 hover:bg-gold-soft disabled:cursor-wait disabled:opacity-50"
-          >
-            {busy ? "Securing your passes…" : `Book · ${totalLabel}`}
-          </button>
-          <PolicyAck agreed={agreed} onChange={setAgreed} />
+      {items.length > 0 && !detailsInView && (
+        <div
+          role="region"
+          aria-label="Cart summary"
+          className="sticky bottom-0 z-20 -mx-5 mt-4 border-t border-gold/30 bg-rich/95 px-5 py-3 backdrop-blur sm:-mx-8 sm:px-8 lg:hidden"
+        >
+          <div className="flex items-center justify-between gap-3">
+            <p className="min-w-0 text-[0.66rem] uppercase leading-snug tracking-[0.1em] text-ivory/65" aria-live="polite">
+              <span className="block">
+                {selections} {selections === 1 ? "selection" : "selections"} · {admissions} total {admissions === 1 ? "admission" : "admissions"}
+              </span>
+              <span className="mt-0.5 block font-display text-[1.3rem] normal-case leading-none tracking-normal text-ivory tabular-nums">
+                {priced ? exactMoney(priced.total, currency) : exactMoney(localSubtotal, currency)}
+                {!priced && <span className="ml-1 text-[0.62rem] uppercase tracking-[0.12em] text-ivory/45">+ tax</span>}
+              </span>
+            </p>
+            <button
+              type="button"
+              onClick={continueToDetails}
+              className="h-11 shrink-0 rounded-[2px] bg-gold px-5 text-[0.64rem] font-semibold uppercase tracking-[0.18em] text-rich transition-colors hover:bg-gold-soft"
+            >
+              Continue
+            </button>
+          </div>
         </div>
-      </div>
-
+      )}
     </form>
   );
 }
@@ -710,9 +839,11 @@ function Stepper({
       aria-label={label}
       disabled={disabled}
       onClick={onClick}
-      className="flex size-8 items-center justify-center rounded-full border border-ivory/20 text-base text-ivory transition-colors duration-500 hover:border-gold disabled:opacity-30"
+      className="flex size-11 items-center justify-center text-xl text-ivory transition-colors duration-300 hover:text-gold disabled:opacity-30"
     >
-      {children}
+      <span aria-hidden className="flex size-8 items-center justify-center rounded-full border border-ivory/25">
+        {children}
+      </span>
     </button>
   );
 }

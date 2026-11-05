@@ -307,7 +307,7 @@ function eventProfile(tiers: TierRow[], salesStatus: string | null) {
 }
 
 async function scanRows<T>(
-  table: "orders" | "tickets",
+  table: "orders" | "tickets" | "order_items",
   columns: string,
   eventId: string,
 ): Promise<T[]> {
@@ -342,7 +342,7 @@ async function metrics(eventId: string) {
   if (!tiers.length) return { error: "Event not found" };
   const ops = await eventOps(eventId);
   const profile = eventProfile(tiers, ops?.status ?? null);
-  const [orders, tickets, holds] = await Promise.all([
+  const [orders, tickets, holds, itemRows] = await Promise.all([
     scanRows<Pick<OrderRow, "id" | "tier_id" | "quantity" | "amount_total" | "currency" | "status" | "created_at" | "discounted_subtotal_cents" | "tax_cents">>(
       "orders",
       "id, tier_id, quantity, amount_total, currency, status, created_at, discounted_subtotal_cents, tax_cents",
@@ -354,7 +354,15 @@ async function metrics(eventId: string) {
       eventId,
     ),
     holdMap(eventId),
+    // Orders from mixed-ticket carts carry one row per ticket type. Older orders have none.
+    scanRows<{ order_id: string; tier_id: string; quantity: number; total_admissions: number; line_total_cents: number }>(
+      "order_items",
+      "order_id, tier_id, quantity, total_admissions, line_total_cents",
+      eventId,
+    ),
   ]);
+  const itemsByOrder = new Map<string, typeof itemRows>();
+  for (const item of itemRows) itemsByOrder.set(item.order_id, [...(itemsByOrder.get(item.order_id) ?? []), item]);
   const price = new Map(tiers.map((tier) => [tier.tier_id, tier]));
   let gross = 0;
   let subtotal = 0;
@@ -367,6 +375,7 @@ async function metrics(eventId: string) {
   const days = new Map<string, { orders: number; charged: number; refunded: number; issued: number }>();
   for (const order of orders) {
     gross += order.amount_total;
+    const lines = itemsByOrder.get(order.id);
     const tier = price.get(order.tier_id);
     const parts = orderParts(order, tier?.price_cents);
     if (!parts) split = false;
@@ -379,16 +388,24 @@ async function metrics(eventId: string) {
       const bucket = days.get(day) ?? { orders: 0, charged: 0, refunded: 0, issued: 0 };
       bucket.orders += 1;
       bucket.charged += order.amount_total;
-      bucket.issued += order.quantity * Math.max(tier?.admits ?? 1, 1);
+      bucket.issued += lines
+        ? lines.reduce((sum, line) => sum + line.total_admissions, 0)
+        : order.quantity * Math.max(tier?.admits ?? 1, 1);
       if (order.status === "refunded") bucket.refunded += order.amount_total;
       days.set(day, bucket);
     }
+    // Per ticket type: a mixed-ticket order contributes each of its lines; an older order its one tier.
+    const contributions = lines
+      ? lines.map((line) => ({ tierId: line.tier_id, units: line.quantity, charged: line.line_total_cents }))
+      : [{ tierId: order.tier_id, units: order.quantity, charged: order.amount_total }];
     if (order.status === "refunded") {
       refunded += order.amount_total;
-      refundedUnits.set(order.tier_id, (refundedUnits.get(order.tier_id) ?? 0) + order.quantity);
+      for (const part of contributions) refundedUnits.set(part.tierId, (refundedUnits.get(part.tierId) ?? 0) + part.units);
     } else {
-      soldUnits.set(order.tier_id, (soldUnits.get(order.tier_id) ?? 0) + order.quantity);
-      revenue.set(order.tier_id, (revenue.get(order.tier_id) ?? 0) + order.amount_total);
+      for (const part of contributions) {
+        soldUnits.set(part.tierId, (soldUnits.get(part.tierId) ?? 0) + part.units);
+        revenue.set(part.tierId, (revenue.get(part.tierId) ?? 0) + part.charged);
+      }
     }
   }
   const issued = new Map<string, number>();
@@ -570,7 +587,12 @@ async function promoReport(body: Record<string, unknown>) {
       orders.push(...((data ?? []) as OrderRow[]));
       if (!data || data.length < 500) break;
     }
-    const counts = await admissionCounts(orders.map((order) => order.id));
+    const orderIds = orders.map((order) => order.id);
+    const counts = await promoAdmissionCounts(orderIds);
+    const itemsByOrder = await loadOrderItems(orderIds);
+    // admissions*: passes on the lines the code actually discounted (all passes of an older order,
+    // which was priced as one discounted line). orderAdmissions*: every pass in an order that used the code,
+    // so a Couple or Group in the same cart is visible but is not counted as a discounted admission.
     const summary = {
       orders: orders.length,
       currentOrders: 0,
@@ -578,6 +600,8 @@ async function promoReport(body: Record<string, unknown>) {
       disputedOrders: 0,
       admissionsActive: 0,
       admissionsIssued: 0,
+      orderAdmissionsActive: 0,
+      orderAdmissionsIssued: 0,
       originalValue: 0,
       discounts: 0,
       netSubtotal: 0,
@@ -589,9 +613,11 @@ async function promoReport(body: Record<string, unknown>) {
       netRevenue: 0,
     };
     for (const order of orders) {
-      const tickets = counts.get(order.id) ?? { issued: 0, active: 0 };
-      summary.admissionsIssued += tickets.issued;
-      summary.admissionsActive += tickets.active;
+      const tickets = counts.get(order.id) ?? { issued: 0, active: 0, eligibleIssued: 0, eligibleActive: 0 };
+      summary.admissionsIssued += tickets.eligibleIssued;
+      summary.admissionsActive += tickets.eligibleActive;
+      summary.orderAdmissionsIssued += tickets.issued;
+      summary.orderAdmissionsActive += tickets.active;
       summary.grossSales += order.amount_total;
       if (order.status === "refunded") {
         summary.refundedOrders += 1;
@@ -625,8 +651,10 @@ async function promoReport(body: Record<string, unknown>) {
         purchaser: order.purchaser_name,
         email: order.purchaser_email,
         tier: order.tier_name,
+        items: presentItems(itemsByOrder.get(order.id)),
         units: order.quantity,
         admissions: counts.get(order.id)?.issued ?? 0,
+        discountedAdmissions: counts.get(order.id)?.eligibleIssued ?? 0,
         promoCode: order.promo_code,
         discountPercent: order.discount_percent,
         originalSubtotal: order.original_subtotal_cents,
@@ -651,8 +679,62 @@ async function sales(eventId: string) {
   return { currency: summary.currency, timeline: summary.timeline, tiers: summary.tiers };
 }
 
-function presentOrder(order: OrderRow, admissions: number, parts: { subtotal: number; tax: number; total: number } | null, eventName: string) {
+interface OrderItemRow {
+  order_id: string;
+  position: number;
+  tier_id: string;
+  display_name_snapshot: string;
+  unit_price_cents: number;
+  quantity: number;
+  total_admissions: number;
+  original_line_subtotal_cents: number;
+  promo_eligible: boolean;
+  eligible_discount_cents: number;
+  discounted_line_subtotal_cents: number;
+  tax_cents: number;
+  line_total_cents: number;
+}
+
+const ORDER_ITEM_COLUMNS =
+  "order_id, position, tier_id, display_name_snapshot, unit_price_cents, quantity, total_admissions, original_line_subtotal_cents, promo_eligible, eligible_discount_cents, discounted_line_subtotal_cents, tax_cents, line_total_cents";
+
+// The frozen line snapshot of mixed-ticket orders. Older orders have none and are absent from the map.
+async function loadOrderItems(orderIds: string[]) {
+  const byOrder = new Map<string, OrderItemRow[]>();
+  for (let i = 0; i < orderIds.length; i += 200) {
+    const { data, error } = await admin.from("order_items").select(ORDER_ITEM_COLUMNS).in("order_id", orderIds.slice(i, i + 200));
+    if (error) throw error;
+    for (const item of (data ?? []) as OrderItemRow[]) byOrder.set(item.order_id, [...(byOrder.get(item.order_id) ?? []), item]);
+  }
+  for (const list of byOrder.values()) list.sort((a, b) => a.position - b.position);
+  return byOrder;
+}
+
+function presentItems(items: OrderItemRow[] | undefined) {
+  return (items ?? []).map((item) => ({
+    tierId: item.tier_id,
+    name: item.display_name_snapshot,
+    unitPrice: item.unit_price_cents,
+    quantity: item.quantity,
+    admissions: item.total_admissions,
+    lineSubtotal: item.original_line_subtotal_cents,
+    promoEligible: item.promo_eligible,
+    discount: item.eligible_discount_cents,
+    discountedSubtotal: item.discounted_line_subtotal_cents,
+    tax: item.tax_cents,
+    lineTotal: item.line_total_cents,
+  }));
+}
+
+function presentOrder(
+  order: OrderRow,
+  admissions: number,
+  parts: { subtotal: number; tax: number; total: number } | null,
+  eventName: string,
+  items?: OrderItemRow[],
+) {
   return {
+    items: presentItems(items),
     ref: orderRefFromId(order.id),
     purchaser: order.purchaser_name,
     email: order.purchaser_email,
@@ -682,9 +764,33 @@ async function presentOrders(orders: OrderRow[], tiers: { id: string; priceCents
   if (!orders.length) return [];
   const prices = new Map(tiers.map((tier) => [tier.id, tier.priceCents]));
   const counts = await admissionCounts(orders.map((order) => order.id));
+  const items = await loadOrderItems(orders.map((order) => order.id));
   return orders.map((order) =>
-    presentOrder(order, counts.get(order.id)?.issued ?? 0, orderParts(order, prices.get(order.tier_id)), eventName)
+    presentOrder(order, counts.get(order.id)?.issued ?? 0, orderParts(order, prices.get(order.tier_id)), eventName, items.get(order.id))
   );
+}
+
+// Pass counts per order, split by whether each pass sits on a promo-discounted line.
+async function promoAdmissionCounts(orderIds: string[]) {
+  const items = await loadOrderItems(orderIds);
+  const counts = new Map<string, { issued: number; active: number; eligibleIssued: number; eligibleActive: number }>();
+  for (let i = 0; i < orderIds.length; i += 200) {
+    const { data, error } = await admin.from("tickets").select("order_id, tier_id, status").in("order_id", orderIds.slice(i, i + 200));
+    if (error) throw error;
+    for (const ticket of data ?? []) {
+      const entry = counts.get(ticket.order_id) ?? { issued: 0, active: 0, eligibleIssued: 0, eligibleActive: 0 };
+      const lines = items.get(ticket.order_id);
+      const eligible = !lines || lines.some((line) => line.tier_id === ticket.tier_id && line.promo_eligible);
+      entry.issued += 1;
+      if (eligible) entry.eligibleIssued += 1;
+      if (ticket.status !== "cancelled") {
+        entry.active += 1;
+        if (eligible) entry.eligibleActive += 1;
+      }
+      counts.set(ticket.order_id, entry);
+    }
+  }
+  return counts;
 }
 
 async function admissionCounts(orderIds: string[]) {
@@ -700,6 +806,14 @@ async function admissionCounts(orderIds: string[]) {
     }
   }
   return counts;
+}
+
+// Order ids whose mixed-ticket cart includes a ticket type. Both inputs are validated: the tier id by
+// parseTierId, the order ids are database uuids, so they are safe inside a PostgREST filter list.
+async function orderIdsWithTier(eventId: string, tierId: string): Promise<string[]> {
+  const { data, error } = await admin.from("order_items").select("order_id").eq("event_id", eventId).eq("tier_id", tierId).limit(5000);
+  if (error) throw error;
+  return [...new Set<string>((data ?? []).map((row: { order_id: string }) => row.order_id))];
 }
 
 async function listOrders(body: Record<string, unknown>) {
@@ -735,7 +849,9 @@ async function listOrders(body: Record<string, unknown>) {
     const order = data as OrderRow;
     if (payment && order.status !== payment) return { orders: [], page: 1, pageSize: page.pageSize, total: 0 };
     if (!matchesRefund(order.status, refund)) return { orders: [], page: 1, pageSize: page.pageSize, total: 0 };
-    if (tierId && order.tier_id !== tierId) return { orders: [], page: 1, pageSize: page.pageSize, total: 0 };
+    if (tierId && order.tier_id !== tierId && !(await orderIdsWithTier(eventId, tierId)).includes(order.id)) {
+      return { orders: [], page: 1, pageSize: page.pageSize, total: 0 };
+    }
     if (promo === "none" ? order.promo_code != null : promo && order.promo_code !== promo) {
       return { orders: [], page: 1, pageSize: page.pageSize, total: 0 };
     }
@@ -757,7 +873,11 @@ async function listOrders(body: Record<string, unknown>) {
   if (refund === "partial") request = request.eq("status", "partially-refunded");
   if (refund === "disputed") request = request.eq("status", "disputed");
   if (refund === "none") request = request.eq("status", "paid");
-  if (tierId) request = request.eq("tier_id", tierId);
+  if (tierId) {
+    // A tier filter also finds mixed-ticket orders that include the tier on any line.
+    const mixed = await orderIdsWithTier(eventId, tierId);
+    request = mixed.length ? request.or(`tier_id.eq.${tierId},id.in.(${mixed.join(",")})`) : request.eq("tier_id", tierId);
+  }
   if (promo === "none") request = request.is("promo_code", null);
   else if (promo) request = request.eq("promo_code", promo);
   if (fromDay) request = request.gte("created_at", `${fromDay}T00:00:00.000Z`);
@@ -798,7 +918,7 @@ async function orderDetail(body: Record<string, unknown>) {
   const tier = tiers.find((item) => item.tier_id === order.tier_id);
   const { data: tickets, error: ticketError } = await admin
     .from("tickets")
-    .select("id, guest_number, status, checked_in_at")
+    .select("id, guest_number, tier_id, status, checked_in_at")
     .eq("order_id", order.id)
     .eq("event_id", eventId)
     .order("guest_number");
@@ -809,6 +929,7 @@ async function orderDetail(body: Record<string, unknown>) {
     tickets: (tickets ?? []).map((ticket) => ({
       ref: ticketRefFromId(ticket.id),
       guestNumber: ticket.guest_number,
+      tier: tiers.find((item) => item.tier_id === ticket.tier_id)?.name ?? order.tier_name,
       status: displayTicketStatus(ticket.status, order.status),
       checkedInAt: ticket.checked_in_at,
     })),
@@ -984,6 +1105,9 @@ async function recentScans(eventId: string) {
     if (!data || data.length < 200) break;
   }
   const orderOf = (row: (typeof rows)[number]) => (Array.isArray(row.tickets?.orders) ? row.tickets?.orders[0] : row.tickets?.orders);
+  const tierNames = new Map(
+    (await loadTiers()).filter((tier) => tier.event_id === eventId).map((tier) => [tier.tier_id, tier.name]),
+  );
   const matched = rows.filter((row) =>
     (!row.tickets || row.tickets.event_id === eventId)
     && !orderOf(row)?.is_test
@@ -995,7 +1119,7 @@ async function recentScans(eventId: string) {
     return {
       at: row.created_at,
       ref: sameEvent && row.tickets ? ticketRefFromId(row.tickets.id) : null,
-      tier: sameEvent ? order?.tier_name ?? null : null,
+      tier: sameEvent ? (row.tickets ? tierNames.get(row.tickets.tier_id) : undefined) ?? order?.tier_name ?? null : null,
       result: displayScanResult(row.outcome, sameEvent ? order?.status ?? "" : ""),
     };
   });

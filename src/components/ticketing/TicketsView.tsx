@@ -17,6 +17,8 @@ import { passStanding } from "@/lib/pass-standing";
 
 interface TicketRow {
   guest_number: number;
+  /** Present for every pass once the order carries items; older responses omit it. */
+  tier_name?: string;
   token: string;
   status: "valid" | "checked-in" | "cancelled";
   checked_in_at: string | null;
@@ -294,7 +296,7 @@ function Passes({ order, qr, onChanged }: { order: OrderView; qr: Record<string,
             orderStatus={order.status}
             total={total}
             svg={qr[ticket.token]}
-            tierName={order.tier_name}
+            tierName={ticket.tier_name ?? order.tier_name}
             holder={named ?? (total > 1 ? `Guest ${ticket.guest_number}` : null)}
             footLeft={
               event?.date
@@ -334,7 +336,7 @@ function Passes({ order, qr, onChanged }: { order: OrderView; qr: Record<string,
           guestNumber={ticket.guest_number}
           total={total}
           token={ticket.token}
-          tierName={order.tier_name}
+          tierName={ticket.tier_name ?? order.tier_name}
           event={event}
           when={when}
           venue={venue?.name ?? event?.city ?? ""}

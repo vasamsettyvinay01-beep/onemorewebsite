@@ -23,6 +23,35 @@ type TaxClient = {
 };
 
 /**
+ * Exclusive ticket tax for a whole cart. One Stripe Tax line per ticket type,
+ * each at its server-priced, post-discount amount: eligible lines carry their
+ * promo discount, ineligible lines are full price. Same tax code, venue and
+ * performance location as a single ticket. Amounts are integer cents.
+ */
+export async function quoteCartTotal(
+  stripe: TaxClient,
+  currency: string,
+  lines: { amount: number; reference: string }[],
+): Promise<{ tax: number; total: number; calculationId: string }> {
+  const calculation = await stripe.tax.calculations.create({
+    currency,
+    customer_details: { address: VENUE_ADDRESS, address_source: "billing" },
+    line_items: lines.map((line) => ({
+      amount: line.amount,
+      reference: line.reference,
+      tax_behavior: "exclusive",
+      tax_code: TICKET_TAX_CODE,
+      performance_location: PERFORMANCE_LOCATION,
+    })),
+  });
+  return {
+    tax: calculation.tax_amount_exclusive,
+    total: calculation.amount_total,
+    calculationId: calculation.id,
+  };
+}
+
+/**
  * Exclusive ticket tax for a server-priced line. `lineCents` is the taxable
  * ticket subtotal after any promo discount. Amounts are integer cents.
  */
