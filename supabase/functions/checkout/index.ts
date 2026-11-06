@@ -112,6 +112,10 @@ async function handle(req: Request): Promise<Response> {
   if (!tier) return json(req, { error: "This pass isn't available." }, 404);
   if (nightHasEnded(tier.metadata)) return json(req, { error: "This night has ended." }, 409);
   if (quantity > tier.max_per_order) return json(req, { error: `Up to ${tier.max_per_order} per booking.` }, 400);
+  // Real people, not units: the same cap the cart path applies. A Group of 8 x3 is 24 admissions.
+  if (quantity * Math.max(Number(tier.admits) || 1, 1) > MAX_CART_ADMISSIONS) {
+    return json(req, { error: CART_ERRORS.too_many_admissions, code: "too_many_admissions" }, 400);
+  }
 
   if (tier.opens_after) {
     const { data: gate } = await admin

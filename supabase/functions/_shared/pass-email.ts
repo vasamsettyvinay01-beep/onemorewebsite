@@ -206,7 +206,7 @@ export function renderPassEmail(input: PassEmail): { subject: string; html: stri
     <tr><td bgcolor="${C.stock}" style="padding:6px 10px 0;background:${C.stock}">
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="${C.gold}" style="background:${C.gold}"><tr><td bgcolor="${C.gold}" style="padding:1px;background:${C.gold}">
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="${C.card}" style="background:${C.card}"><tr><td align="center" bgcolor="${C.card}" style="padding:8px 6px 8px;background:${C.card}">
-          <div style="${caps(8, C.gold, 0.28)}">${grouped ? "Your passes" : `Admit one &middot; ${esc(d.tierName)}`}</div>
+          <div style="${caps(8, C.gold, 0.28)}">${grouped ? "Your passes" : total > 1 ? `${esc(d.tierName)} &middot; ${total} admissions` : `Admit one &middot; ${esc(d.tierName)}`}</div>
           ${d.name ? `<div style="margin-top:2px;font:italic 400 17px/1.1 ${SERIF};color:${C.ivory};white-space:nowrap">${esc(d.name)}</div>` : ""}
           ${
             grouped
@@ -264,7 +264,7 @@ export function renderPassEmail(input: PassEmail): { subject: string; html: stri
           ...d.groups!.map((group) => `${group.tierName} — ${group.passes.length} ${group.passes.length === 1 ? "admission" : "admissions"}`),
           `${total} ${total === 1 ? "guest" : "guests"} in all`,
         ]
-      : [`${d.tierName} · ${total} ${total === 1 ? "guest" : "guests"}`]),
+      : [`${d.tierName} · ${total} ${total === 1 ? "guest" : "admissions"}`]),
     "",
     ...(d.invitation ? [d.invitation, ""] : []),
     ...(d.partners?.length ? [`Partners: ${d.partners.map((p) => p.name).join(", ")}`, ""] : []),

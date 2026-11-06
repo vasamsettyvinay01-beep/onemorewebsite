@@ -202,6 +202,7 @@ test("cash sales reject sold-out, inactive, VIP, complimentary, and a bad price 
   assert.equal(oversold.order_id, null);
   assert.equal(await sold("female"), 1);
 
+  await db.query("update tiers set active = false where tier_id = 'group-8'");
   const inactive = await cash([{ tierId: "group-8", quantity: 1 }]);
   assert.equal(inactive.outcome, "unavailable");
   const vip = await cash([{ tierId: "vip", quantity: 1, name: "VIP", unitCents: 1, admits: 1 }]);

@@ -317,9 +317,10 @@ test("fulfilment re-checks inventory: a line sold out meanwhile makes the whole 
 
 test("reserve_cart rejects inactive, private, unknown and malformed lines", async () => {
   await db.exec(`insert into tiers (event_id, tier_id, name, price_cents, currency, admits, active)
-                 values ('${EVENT}', 'vip', 'VIP', 5000, 'usd', 1, false)`);
+                 values ('${EVENT}', 'vip', 'VIP', 5000, 'usd', 1, false),
+                        ('${EVENT}', 'retired', 'Retired pass', 5000, 'usd', 1, false)`);
   const cases = [
-    ["inactive tier (Group of 8)", [{ tierId: "group-8", quantity: 1 }], /unavailable/],
+    ["inactive tier", [{ tierId: "retired", quantity: 1 }], /unavailable/],
     ["inactive VIP row", [{ tierId: "vip", quantity: 1 }], /unavailable/],
     ["complimentary is not a tier", [{ tierId: "complimentary", quantity: 1 }], /unavailable/],
     ["unknown tier", [{ tierId: "nope", quantity: 1 }], /unavailable/],

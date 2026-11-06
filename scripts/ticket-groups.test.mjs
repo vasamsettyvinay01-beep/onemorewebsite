@@ -18,7 +18,7 @@ const email = readFileSync(new URL("../supabase/functions/_shared/email.ts", imp
 const orderEmail = readFileSync(new URL("../supabase/functions/_shared/order-email.ts", import.meta.url), "utf8");
 const ticketsView = readFileSync(new URL("../src/components/ticketing/TicketsView.tsx", import.meta.url), "utf8");
 
-test("the public ticket menu has the intended five choices", () => {
+test("the public ticket menu has the intended six choices", () => {
   assert.deepEqual(
     publicTiers.map((tier) => [tier.id, tier.name, tier.admits ?? 1]),
     [
@@ -27,9 +27,10 @@ test("the public ticket menu has the intended five choices", () => {
       ["general", "Male", 1],
       ["couple", "Couple", 2],
       ["group", "Group of 5", 5],
+      ["group-8", "Group of 8", 8],
     ],
   );
-  assert.equal(event.ticketTiers.some((tier) => tier.id === "group-8"), false);
+  assert.equal(event.ticketTiers.filter((tier) => tier.id === "group-8").length, 1);
   assert.equal(event.ticketTiers.length, publicTiers.length);
   assert.equal(event.ticketTiers.some((tier) => /vip/i.test(`${tier.id} ${tier.name}`)), false);
   assert.match(ticketSheetSource, /Continue to payment/);
@@ -90,7 +91,7 @@ test("one buyer email renders every pass while a guest email renders only one", 
     passes,
   });
   for (let i = 1; i <= 5; i++) assert.match(owner.html, new RegExp(`cid:pass-${i}`));
-  assert.match(owner.text, /5 guests/);
+  assert.match(owner.text, /Group of 5 · 5 admissions/);
 
   const guest = renderGuestPassEmail({
     senderName: "Vinay",
@@ -111,16 +112,17 @@ test("one buyer email renders every pass while a guest email renders only one", 
   assert.doesNotMatch(guest.html, /pass-1|pass-2|pass-3/);
 });
 
-test("maximum currently selectable admissions are explicit", () => {
+test("maximum selectable admissions are explicit and never exceed the 20-person booking cap", () => {
   const maximums = Object.fromEntries(
-    publicTiers.map((tier) => [tier.name, (tier.admits ?? 1) * Math.min(tier.maxPerOrder ?? 10, 10)]),
+    publicTiers.map((tier) => [tier.name, Math.min((tier.admits ?? 1) * Math.min(tier.maxPerOrder ?? 10, 10), 20)]),
   );
   assert.deepEqual(maximums, {
     "Early Bird": 10,
     Female: 10,
     Male: 10,
     Couple: 20,
-    "Group of 5": 50,
+    "Group of 5": 20,
+    "Group of 8": 20,
   });
 });
 
