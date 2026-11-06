@@ -33,6 +33,7 @@ const NAV = [
   { href: "/admin", label: "Overview", exact: true },
   { href: "/admin/events", label: "Events" },
   { href: "/admin/orders", label: "Orders" },
+  { href: "/admin/cash", label: "Cash sale" },
   { href: "/admin/tickets", label: "Tickets" },
   { href: "/admin/check-in", label: "Check-in" },
   { href: "/admin/audit", label: "Audit" },
@@ -43,7 +44,7 @@ const NAV = [
   { href: "/admin/staff", label: "Staff" },
 ];
 
-const SUPER_ADMIN_ONLY = new Set(["/admin/complimentary", "/admin/promos", "/admin/vip"]);
+const SUPER_ADMIN_ONLY = new Set(["/admin/complimentary", "/admin/promos", "/admin/vip", "/admin/cash"]);
 
 export function AdminShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();

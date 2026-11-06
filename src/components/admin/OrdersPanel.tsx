@@ -43,6 +43,7 @@ function OrderTable({
   const [tierId, setTierId] = useState("");
   const [promo, setPromo] = useState(initialPromo === "none" || promoCodes.includes(initialPromo) ? initialPromo : "");
   const [paymentStatus, setPaymentStatus] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState("");
   const [refundStatus, setRefundStatus] = useState("");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
@@ -54,7 +55,7 @@ function OrderTable({
     setPageEvent(eventId);
     setPage(1);
   }
-  const requestKey = [eventId, q, tierId, promo, paymentStatus, refundStatus, from, to, page, nonce].join("|");
+  const requestKey = [eventId, q, tierId, promo, paymentStatus, paymentMethod, refundStatus, from, to, page, nonce].join("|");
 
   useEffect(() => {
     if (!eventId) return;
@@ -65,6 +66,7 @@ function OrderTable({
       tierId,
       promo,
       paymentStatus,
+      paymentMethod,
       refundStatus,
       from,
       to,
@@ -80,7 +82,7 @@ function OrderTable({
     return () => {
       cancel = true;
     };
-  }, [eventId, q, tierId, promo, paymentStatus, refundStatus, from, to, page, nonce, requestKey]);
+  }, [eventId, q, tierId, promo, paymentStatus, paymentMethod, refundStatus, from, to, page, nonce, requestKey]);
 
   function search(e: FormEvent) {
     e.preventDefault();
@@ -116,6 +118,11 @@ function OrderTable({
             <option key={code} value={code}>{code}</option>
           ))}
         </select>
+        <select className={inputClass} value={paymentMethod} onChange={(e) => { setPaymentMethod(e.target.value); setPage(1); }} aria-label="Payment method">
+          <option value="">All methods</option>
+          <option value="card">Card</option>
+          <option value="cash">Cash</option>
+        </select>
         <select className={inputClass} value={paymentStatus} onChange={(e) => { setPaymentStatus(e.target.value); setPage(1); }} aria-label="Payment state">
           <option value="">Any payment</option>
           <option value="paid">Paid</option>
@@ -148,7 +155,7 @@ function OrderTable({
             </div>
             <p className="mt-1">{order.purchaser || "Guest"}</p>
             <p className="truncate text-white/50">{order.email}</p>
-            <p className="mt-2 text-white/70">{order.tier} · {order.units} units · {order.admissions} admissions</p>
+            <p className="mt-2 text-white/70">{order.tier} · {order.units} units · {order.admissions} admissions{order.paymentMethod === "cash" ? " · Cash" : ""}</p>
             {order.promoLabel && <p className="mt-1 text-white/60">{order.promoLabel} · −{money(order.discount, order.currency)}</p>}
             <p className="mt-1 tabular-nums">{money(order.total, order.currency)}</p>
           </Link>
@@ -195,7 +202,8 @@ function OrderDetailView({ eventId, refCode }: { eventId: string; refCode: strin
   const router = useRouter();
   const valid = /^OMC-[0-9A-F]{8}$/i.test(refCode);
   const [loaded, setLoaded] = useState<{ key: string; detail: OrderDetail | null; error: string | null } | null>(null);
-  const requestKey = `${eventId}|${refCode}`;
+  const [nonce, setNonce] = useState(0);
+  const requestKey = `${eventId}|${refCode}|${nonce}`;
 
   useEffect(() => {
     if (!eventId || !valid) return;
@@ -244,15 +252,27 @@ function OrderDetailView({ eventId, refCode }: { eventId: string; refCode: strin
             <Item label={detail.order.promoLabel ? "Subtotal after discount" : "Subtotal"} value={money(detail.order.subtotal, detail.order.currency)} />
             <Item label="Tax" value={money(detail.order.tax, detail.order.currency)} />
             <Item label="Total" value={money(detail.order.total, detail.order.currency)} />
-            <Item label="Payment" value={detail.order.paymentStatus} />
+            <Item label="Payment" value={detail.order.paymentMethod === "cash" ? "CASH" : detail.order.paymentStatus} />
+            {detail.order.paymentMethod === "cash" && (
+              <>
+                <Item label="Collected" value={money(detail.order.cashReceived, detail.order.currency)} />
+                <Item label="Collected by" value={detail.order.issuedBy || "Super admin"} />
+                <Item label="Collected at" value={when(detail.order.paidAt)} />
+                {detail.order.cashRefundedAt && <Item label="Cash returned at" value={when(detail.order.cashRefundedAt)} />}
+                {detail.order.cashRefundedBy && <Item label="Cash returned by" value={detail.order.cashRefundedBy} />}
+              </>
+            )}
             <Item label="Refund" value={detail.order.refundStatus} />
             <Item label="Created" value={when(detail.order.createdAt)} />
             <Item label="Email status" value={detail.order.emailStatus} />
           </dl>
-          {detail.order.paymentStatus === "paid" && (
+          {detail.order.paymentStatus === "paid" && detail.order.paymentMethod !== "cash" && (
             <Link href={`/admin/refunds?ref=${detail.order.ref}`} className="inline-block text-sm text-white/70 underline-offset-2 hover:underline">
               Refund this order
             </Link>
+          )}
+          {detail.order.paymentMethod === "cash" && detail.order.paymentStatus === "paid" && (
+            <CashRefund refCode={detail.order.ref} eventId={eventId} onDone={() => setNonce((value) => value + 1)} />
           )}
           {detail.order.items && detail.order.items.length > 0 && (
             <section className="rounded-lg border border-white/10 bg-[#171916] p-3" aria-label="Ticket lines">
@@ -324,6 +344,57 @@ function OrderDetailView({ eventId, refCode }: { eventId: string; refCode: strin
         </div>
       )}
     </div>
+  );
+}
+
+function CashRefund({ refCode, eventId, onDone }: { refCode: string; eventId: string; onDone: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [returned, setReturned] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  if (!open) {
+    return (
+      <button type="button" className={quietButton} onClick={() => setOpen(true)}>Refund cash sale</button>
+    );
+  }
+  return (
+    <form
+      className="rounded-lg border border-white/10 bg-[#171916] p-3 text-sm"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (!returned) return;
+        setBusy(true);
+        setError(null);
+        adminCall<{ message: string }>("cash_refund", {
+          eventId,
+          ref: refCode,
+          confirm: "I confirm the cash amount has been returned to the customer.",
+        })
+          .then((body) => {
+            setMessage(body.message);
+            setOpen(false);
+            onDone();
+          })
+          .catch((err: unknown) => setError(err instanceof AdminApiError ? err.message : "The cash refund did not go through."))
+          .finally(() => setBusy(false));
+      }}
+    >
+      <p className="font-medium">Refund cash sale</p>
+      <p className="mt-1 text-white/60">This does not contact Stripe. A cash refund is available only when no pass from this order has been admitted. It then cancels every pass and restores the inventory.</p>
+      <label className="mt-3 flex items-start gap-2">
+        <input type="checkbox" className="mt-1" checked={returned} onChange={(event) => setReturned(event.target.checked)} />
+        <span>I confirm the cash amount has been returned to the customer.</span>
+      </label>
+      {error && <div className="mt-2"><ErrorNote>{error}</ErrorNote></div>}
+      {message && <p className="mt-2 text-emerald-100">{message}</p>}
+      <div className="mt-3 flex gap-2">
+        <button type="button" className={quietButton} onClick={() => setOpen(false)}>Cancel</button>
+        <button type="submit" className="h-9 rounded-md bg-[#eceae4] px-3 text-sm font-semibold text-[#141513] disabled:opacity-40" disabled={!returned || busy}>
+          {busy ? "Refunding…" : "Refund cash sale"}
+        </button>
+      </div>
+    </form>
   );
 }
 

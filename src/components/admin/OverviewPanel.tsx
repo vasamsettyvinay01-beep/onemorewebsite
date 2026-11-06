@@ -58,6 +58,9 @@ export function OverviewPanel() {
 
       <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
         <Stat label="Gross sales" value={money(data.grossSales, data.currency)} />
+        <Stat label="Card sales" value={money(data.cardSales, data.currency)} hint="Paid by card" />
+        <Stat label="Cash sales" value={money(data.cashSales, data.currency)} hint="Collected in cash" />
+        <Stat label="Total paid sales" value={money(data.paidSales, data.currency)} hint="Card and cash, after refunds" />
         <Stat label="Orders" value={count(data.orders)} />
         <Stat label="Admissions sold" value={count(data.admissionsSold)} hint={`${count(data.passesIssued)} issued`} />
         <Stat label="Capacity" value={data.capacity == null ? "No cap" : count(data.capacity)} hint={capacityHint} />

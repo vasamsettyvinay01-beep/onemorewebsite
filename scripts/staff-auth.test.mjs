@@ -42,6 +42,11 @@ test("permission matrix denies door staff and limits admins", () => {
   assert.equal(permit("super_admin", "resend_complimentary"), true);
   assert.equal(permit("super_admin", "complimentary_list"), true);
   assert.equal(permit("super_admin", "refund_one"), true);
+  for (const action of ["complimentary_view", "revoke_complimentary_pass", "revoke_complimentary_issuance", "cash_quote", "cash_issue", "cash_refund"]) {
+    assert.equal(permit("admin", action), false, action);
+    assert.equal(permit("door_staff", action), false, action);
+    assert.equal(permit("super_admin", action), true, action);
+  }
 });
 
 test("privileged roles require authenticator MFA and door staff are outside this API", () => {

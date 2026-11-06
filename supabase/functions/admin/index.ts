@@ -6,6 +6,7 @@
 import Stripe from "npm:stripe@17";
 import { admin, corsHeaders, json } from "../_shared/http.ts";
 import { renderComplimentaryPreview, sendComplimentaryInvitation } from "../_shared/complimentary-delivery.ts";
+import { sendOrderTicketEmail } from "../_shared/order-email.ts";
 import {
   canAssignRole,
   permit,
@@ -33,10 +34,16 @@ import {
   parseComplimentaryCount,
   parseComplimentaryName,
   parseDay,
+  cashReceivedPhraseOk,
+  cashReturnedPhraseOk,
+  complimentaryIssuanceStatus,
+  complimentaryPassCounts,
   parseEventId,
+  parseGuestNumber,
   parseIdempotencyKey,
   parseOrderRef,
   parsePage,
+  parsePaymentMethod,
   parsePaymentStatus,
   parseRefundStatus,
   parseStaffEmail,
@@ -53,7 +60,16 @@ import {
   ticketRefFromId,
   zoneForVenue,
 } from "../_shared/admin-read.mjs";
-import { parsePromoFilter, promoLabel } from "../_shared/promo.mjs";
+import {
+  eligibleTierIds,
+  normalizePromoCode,
+  parsePromoFilter,
+  promoEligibilityMessage,
+  promoLabel,
+  promotionIsLive,
+} from "../_shared/promo.mjs";
+import { buildCartSnapshot, parseCartItems, priceCart, promoHasNoEligibleLine } from "../_shared/cart.mjs";
+import { quoteCartTotal } from "../_shared/pricing.ts";
 import {
   parseVipCapacity,
   parseVipCode,
@@ -112,10 +128,17 @@ interface OrderRow {
   discount_amount_cents: number | null;
   discounted_subtotal_cents: number | null;
   tax_cents: number | null;
+  payment_method: string | null;
+  cash_received_cents: number | null;
+  paid_at: string | null;
+  issued_by: string | null;
+  cash_refunded_at: string | null;
+  cash_refunded_by: string | null;
+  cash_refund_cents: number | null;
 }
 
 const ORDER_COLUMNS =
-  "id, event_id, tier_id, tier_name, quantity, purchaser_name, purchaser_email, amount_total, currency, status, emailed_at, created_at, promo_code, discount_percent, original_subtotal_cents, discount_amount_cents, discounted_subtotal_cents, tax_cents";
+  "id, event_id, tier_id, tier_name, quantity, purchaser_name, purchaser_email, amount_total, currency, status, emailed_at, created_at, promo_code, discount_percent, original_subtotal_cents, discount_amount_cents, discounted_subtotal_cents, tax_cents, payment_method, cash_received_cents, paid_at, issued_by, cash_refunded_at, cash_refunded_by, cash_refund_cents";
 
 // Orders fulfilled after promo codes shipped carry their own price snapshot.
 // Older orders are split from the catalog price, as before.
@@ -197,8 +220,20 @@ Deno.serve(async (req) => {
         return asResult(req, await auditPage(actor, body));
       case "complimentary_list":
         return asResult(req, await complimentaryList(body));
+      case "complimentary_view":
+        return asResult(req, await complimentaryView(body));
       case "complimentary_preview":
         return asResult(req, await complimentaryPreview(body));
+      case "revoke_complimentary_pass":
+        return asResult(req, await revokeComplimentaryPass(actor, body, ip, ua));
+      case "revoke_complimentary_issuance":
+        return asResult(req, await revokeComplimentaryIssuance(actor, body, ip, ua));
+      case "cash_quote":
+        return asResult(req, await cashQuote(body));
+      case "cash_issue":
+        return asResult(req, await cashIssue(actor, body, ip, ua));
+      case "cash_refund":
+        return asResult(req, await cashRefund(actor, body, ip, ua));
       case "promo_report":
         return asResult(req, await promoReport(body));
       case "issue_complimentary":
@@ -343,9 +378,9 @@ async function metrics(eventId: string) {
   const ops = await eventOps(eventId);
   const profile = eventProfile(tiers, ops?.status ?? null);
   const [orders, tickets, holds, itemRows] = await Promise.all([
-    scanRows<Pick<OrderRow, "id" | "tier_id" | "quantity" | "amount_total" | "currency" | "status" | "created_at" | "discounted_subtotal_cents" | "tax_cents">>(
+    scanRows<Pick<OrderRow, "id" | "tier_id" | "quantity" | "amount_total" | "currency" | "status" | "created_at" | "discounted_subtotal_cents" | "tax_cents" | "payment_method">>(
       "orders",
-      "id, tier_id, quantity, amount_total, currency, status, created_at, discounted_subtotal_cents, tax_cents",
+      "id, tier_id, quantity, amount_total, currency, status, created_at, discounted_subtotal_cents, tax_cents, payment_method",
       eventId,
     ),
     scanRows<{ id: string; tier_id: string; status: string; order_id: string }>(
@@ -368,6 +403,8 @@ async function metrics(eventId: string) {
   let subtotal = 0;
   let tax = 0;
   let refunded = 0;
+  let cardSales = 0;
+  let cashSales = 0;
   let split = true;
   const soldUnits = new Map<string, number>();
   const refundedUnits = new Map<string, number>();
@@ -402,6 +439,8 @@ async function metrics(eventId: string) {
       refunded += order.amount_total;
       for (const part of contributions) refundedUnits.set(part.tierId, (refundedUnits.get(part.tierId) ?? 0) + part.units);
     } else {
+      if (order.payment_method === "cash") cashSales += order.amount_total;
+      else cardSales += order.amount_total;
       for (const part of contributions) {
         soldUnits.set(part.tierId, (soldUnits.get(part.tierId) ?? 0) + part.units);
         revenue.set(part.tierId, (revenue.get(part.tierId) ?? 0) + part.charged);
@@ -415,7 +454,7 @@ async function metrics(eventId: string) {
   let activeAdmissions = 0;
   for (const ticket of tickets) {
     issued.set(ticket.tier_id, (issued.get(ticket.tier_id) ?? 0) + 1);
-    if (ticket.status === "cancelled") cancelled += 1;
+    if (ticket.status === "cancelled" || ticket.status === "revoked") cancelled += 1;
     else {
       activeAdmissions += 1;
       live.set(ticket.tier_id, (live.get(ticket.tier_id) ?? 0) + 1);
@@ -477,6 +516,9 @@ async function metrics(eventId: string) {
     ticketSubtotal: split ? subtotal : null,
     taxCollected: split ? tax : null,
     refundedAmount: refunded,
+    cardSales,
+    cashSales,
+    paidSales: cardSales + cashSales,
     cancelledPasses: cancelled,
     activeHolds,
     totalsComplete: split,
@@ -555,6 +597,8 @@ async function events() {
         priceCents: tier.priceCents,
         admits: tier.admits,
         capacity: tier.capacity,
+        remaining: tier.remaining,
+        soldOut: tier.status === "Sold out",
         active: tier.status !== "Inactive",
       })),
       promoCodes: promotions.filter((promo) => promo.event_id === id).map((promo) => promo.code),
@@ -749,6 +793,13 @@ function presentOrder(
     total: order.amount_total,
     currency: order.currency,
     paymentStatus: order.status,
+    paymentMethod: order.payment_method === "cash" ? "cash" : "card",
+    cashReceived: order.cash_received_cents,
+    paidAt: order.paid_at,
+    issuedBy: order.issued_by,
+    cashRefundedAt: order.cash_refunded_at,
+    cashRefundedBy: order.cash_refunded_by,
+    cashRefundCents: order.cash_refund_cents,
     refundStatus: refundLabel(order.status),
     emailStatus: emailLabel(order.emailed_at),
     createdAt: order.created_at,
@@ -783,7 +834,7 @@ async function promoAdmissionCounts(orderIds: string[]) {
       const eligible = !lines || lines.some((line) => line.tier_id === ticket.tier_id && line.promo_eligible);
       entry.issued += 1;
       if (eligible) entry.eligibleIssued += 1;
-      if (ticket.status !== "cancelled") {
+      if (ticket.status !== "cancelled" && ticket.status !== "revoked") {
         entry.active += 1;
         if (eligible) entry.eligibleActive += 1;
       }
@@ -801,7 +852,7 @@ async function admissionCounts(orderIds: string[]) {
     for (const ticket of data ?? []) {
       const entry = counts.get(ticket.order_id) ?? { issued: 0, active: 0 };
       entry.issued += 1;
-      if (ticket.status !== "cancelled") entry.active += 1;
+      if (ticket.status !== "cancelled" && ticket.status !== "revoked") entry.active += 1;
       counts.set(ticket.order_id, entry);
     }
   }
@@ -822,12 +873,13 @@ async function listOrders(body: Record<string, unknown>) {
   const page = parsePage(body.page, body.pageSize);
   const query = cleanSearch(body.q);
   const payment = parsePaymentStatus(body.paymentStatus);
+  const method = parsePaymentMethod(body.paymentMethod);
   const refund = parseRefundStatus(body.refundStatus);
   const tierId = parseTierId(body.tierId);
   const fromDay = parseDay(body.from);
   const toDay = parseDay(body.to);
   const promo = parsePromoFilter(body.promo);
-  if (!page || query === null || payment === null || refund === null || tierId === null || fromDay === null || toDay === null || promo === null) {
+  if (!page || query === null || payment === null || method === null || refund === null || tierId === null || fromDay === null || toDay === null || promo === null) {
     return { error: "Bad filter" };
   }
   const tiers = (await loadTiers()).filter((tier) => tier.event_id === eventId);
@@ -848,6 +900,7 @@ async function listOrders(body: Record<string, unknown>) {
     if (!data) return { orders: [], page: 1, pageSize: page.pageSize, total: 0 };
     const order = data as OrderRow;
     if (payment && order.status !== payment) return { orders: [], page: 1, pageSize: page.pageSize, total: 0 };
+    if (method && order.payment_method !== method) return { orders: [], page: 1, pageSize: page.pageSize, total: 0 };
     if (!matchesRefund(order.status, refund)) return { orders: [], page: 1, pageSize: page.pageSize, total: 0 };
     if (tierId && order.tier_id !== tierId && !(await orderIdsWithTier(eventId, tierId)).includes(order.id)) {
       return { orders: [], page: 1, pageSize: page.pageSize, total: 0 };
@@ -869,6 +922,7 @@ async function listOrders(body: Record<string, unknown>) {
     .eq("is_complimentary", false)
     .order("created_at", { ascending: false });
   if (payment) request = request.eq("status", payment);
+  if (method) request = request.eq("payment_method", method);
   if (refund === "refunded") request = request.eq("status", "refunded");
   if (refund === "partial") request = request.eq("status", "partially-refunded");
   if (refund === "disputed") request = request.eq("status", "disputed");
@@ -924,6 +978,16 @@ async function orderDetail(body: Record<string, unknown>) {
     .order("guest_number");
   if (ticketError) throw ticketError;
   const [presented] = await presentOrders([order], tiers, eventProfile(tiers, null).name);
+  if (presented.paymentMethod === "cash") {
+    const ids = [order.issued_by, order.cash_refunded_by].filter((id): id is string => Boolean(id));
+    if (ids.length) {
+      const { data: staff, error: staffError } = await admin.from("staff_roles").select("user_id, email").in("user_id", ids);
+      if (staffError) throw staffError;
+      const names = new Map((staff ?? []).map((person) => [person.user_id, person.email]));
+      presented.issuedBy = order.issued_by ? names.get(order.issued_by) ?? "Super admin" : null;
+      presented.cashRefundedBy = order.cash_refunded_by ? names.get(order.cash_refunded_by) ?? "Super admin" : null;
+    }
+  }
   return {
     order: { ...presented, eventName: eventProfile(tiers, null).name },
     tickets: (tickets ?? []).map((ticket) => ({
@@ -1227,17 +1291,16 @@ async function complimentaryList(body: Record<string, unknown>) {
   }
   return {
     entries: rows.map((order) => {
-      const tickets = order.tickets ?? [];
-      const used = tickets.filter((ticket) => ticket.status === "checked-in").length;
-      const remaining = tickets.filter((ticket) => ticket.status === "valid").length;
+      const counts = complimentaryPassCounts(order.tickets ?? []);
       return {
         ref: orderRefFromId(order.id),
         name: order.purchaser_name,
         email: order.purchaser_email,
-        issued: order.quantity,
-        used,
-        remaining,
-        status: complimentaryStatus(tickets),
+        issued: counts.issued,
+        used: counts.used,
+        remaining: counts.remaining,
+        revoked: counts.revoked,
+        status: complimentaryIssuanceStatus(order.tickets ?? []),
         emailStatus: emailLabel(order.emailed_at),
         createdAt: order.created_at,
         issuedBy: order.issued_by ? names.get(order.issued_by) ?? "Super admin" : null,
@@ -1250,16 +1313,8 @@ async function complimentaryList(body: Record<string, unknown>) {
   };
 }
 
-function complimentaryStatus(tickets: { status: string }[]): string {
-  const remaining = tickets.filter((ticket) => ticket.status === "valid").length;
-  const used = tickets.filter((ticket) => ticket.status === "checked-in").length;
-  if (tickets.length > 0 && remaining === 0 && used === 0) return "Cancelled";
-  if (remaining === 0) return "Fully used";
-  return "Active";
-}
-
-async function complimentaryMetrics(eventId: string): Promise<{ issued: number; admitted: number; remaining: number }> {
-  const metrics = { issued: 0, admitted: 0, remaining: 0 };
+async function complimentaryMetrics(eventId: string): Promise<{ issued: number; admitted: number; remaining: number; revoked: number }> {
+  const metrics = { issued: 0, admitted: 0, remaining: 0, revoked: 0 };
   for (let from = 0; from < 20000; from += 1000) {
     const { data, error } = await admin
       .from("tickets")
@@ -1273,6 +1328,7 @@ async function complimentaryMetrics(eventId: string): Promise<{ issued: number; 
       metrics.issued += 1;
       if (row.status === "checked-in") metrics.admitted += 1;
       if (row.status === "valid") metrics.remaining += 1;
+      if (row.status === "revoked") metrics.revoked += 1;
     }
     if (!data || data.length < 1000) break;
   }
@@ -1347,25 +1403,29 @@ async function resendComplimentary(actor: Actor, body: Record<string, unknown>, 
   const order = await loadComplimentaryOrder(eventId, prefix);
   if (!order) return { error: "Complimentary order not found." };
 
-  const delivery = await deliverComplimentary(order.id);
+  const valid = complimentaryPassCounts(order.tickets ?? []).remaining;
+  if (valid === 0) {
+    return { ok: false, ref: orderRefFromId(order.id), emailStatus: emailLabel(order.emailed_at), message: "This invitation has no valid remaining passes." };
+  }
+  const delivery = await deliverComplimentary(order.id, true);
   if (delivery.error) {
     await audit(actor, "COMPLIMENTARY_EMAIL_FAILED", "order", order.id, {
       ref: orderRefFromId(order.id),
-      ticket_count: order.quantity,
+      ticket_count: valid,
     }, ip, ua);
     return { ok: false, ref: orderRefFromId(order.id), emailStatus: "Not sent", message: "The email could not be sent. Try again." };
   }
   await audit(actor, "COMPLIMENTARY_EMAIL_RESENT", "order", order.id, {
     ref: orderRefFromId(order.id),
-    ticket_count: order.quantity,
+    ticket_count: valid,
   }, ip, ua);
-  return { ok: true, ref: orderRefFromId(order.id), emailStatus: "Sent", message: `Tickets were sent to ${order.purchaser_email}.` };
+  return { ok: true, ref: orderRefFromId(order.id), emailStatus: "Sent", message: `The ${valid} valid ${valid === 1 ? "pass was" : "passes were"} sent to ${order.purchaser_email}.` };
 }
 
-async function deliverComplimentary(orderId: string) {
+async function deliverComplimentary(orderId: string, force = false) {
   try {
-    const result = await sendComplimentaryInvitation(orderId);
-    if (result === "not_sendable") return { result, error: "email_failed" };
+    const result = await sendComplimentaryInvitation(orderId, { force });
+    if (result === "not_sendable" || result === "none_valid") return { result, error: result };
     return { result, error: null };
   } catch (err) {
     console.error(JSON.stringify({
@@ -1869,6 +1929,366 @@ async function cancelConfirm(body: Record<string, unknown>) {
 }
 
 void cancelConfirm;
+
+async function complimentaryView(body: Record<string, unknown>) {
+  const eventId = textEvent(body);
+  const prefix = parseOrderRef(body.ref);
+  if (!eventId || !prefix) return { error: "Complimentary order not found." };
+  const order = await loadComplimentaryOrder(eventId, prefix);
+  if (!order) return { error: "Complimentary order not found." };
+  const { data, error } = await admin
+    .from("tickets")
+    .select("guest_number, status, checked_in_at, revoked_at")
+    .eq("order_id", order.id)
+    .eq("event_id", eventId)
+    .order("guest_number");
+  if (error) throw error;
+  const passes = data ?? [];
+  const counts = complimentaryPassCounts(passes);
+  return {
+    ref: orderRefFromId(order.id),
+    name: order.purchaser_name,
+    email: order.purchaser_email,
+    ...counts,
+    status: complimentaryIssuanceStatus(passes),
+    passes: passes.map((pass) => ({
+      guestNumber: pass.guest_number,
+      status: pass.status === "checked-in" ? "USED" : pass.status === "revoked" ? "REVOKED" : pass.status === "valid" ? "VALID" : pass.status.toUpperCase(),
+      checkedInAt: pass.checked_in_at,
+      revokedAt: pass.revoked_at,
+    })),
+  };
+}
+
+async function revokeComplimentaryPass(actor: Actor, body: Record<string, unknown>, ip: string, ua: string) {
+  const eventId = textEvent(body);
+  const prefix = parseOrderRef(body.ref);
+  const guestNumber = parseGuestNumber(body.guestNumber);
+  if (body.confirm !== "REVOKE PASS") return { error: "Confirm the pass revocation." };
+  if (!eventId || !prefix || !guestNumber) return { error: "Complimentary pass not found." };
+  const order = await loadComplimentaryOrder(eventId, prefix);
+  if (!order) return { error: "Complimentary order not found." };
+  const { data, error } = await admin.rpc("revoke_complimentary_pass", {
+    p_event_id: eventId,
+    p_order_id: order.id,
+    p_guest_number: guestNumber,
+    p_actor: actor.id,
+  });
+  if (error) throw error;
+  const outcome = (Array.isArray(data) ? data[0] : data) as { outcome: string } | null;
+  if (!outcome || outcome.outcome === "not_found") return { error: "Complimentary pass not found." };
+  if (outcome.outcome === "used") return { error: "This pass was already used. Its admission stays on record." };
+  if (outcome.outcome === "rejected") return { error: "This pass cannot be revoked." };
+  if (outcome.outcome === "revoked") {
+    await audit(actor, "COMPLIMENTARY_PASS_REVOKED", "order", order.id, {
+      ref: orderRefFromId(order.id),
+      guest_number: guestNumber,
+    }, ip, ua);
+  }
+  return { ok: true, ref: orderRefFromId(order.id), guestNumber, outcome: outcome.outcome };
+}
+
+async function revokeComplimentaryIssuance(actor: Actor, body: Record<string, unknown>, ip: string, ua: string) {
+  const eventId = textEvent(body);
+  const prefix = parseOrderRef(body.ref);
+  if (body.confirm !== "REVOKE REMAINING") return { error: "Confirm the revocation." };
+  if (!eventId || !prefix) return { error: "Complimentary order not found." };
+  const order = await loadComplimentaryOrder(eventId, prefix);
+  if (!order) return { error: "Complimentary order not found." };
+  const { data, error } = await admin.rpc("revoke_complimentary_remaining", {
+    p_event_id: eventId,
+    p_order_id: order.id,
+    p_actor: actor.id,
+  });
+  if (error) throw error;
+  const row = (Array.isArray(data) ? data[0] : data) as { outcome: string; revoked_count: number } | null;
+  if (!row || row.outcome === "not_found") return { error: "Complimentary order not found." };
+  if (row.outcome === "rejected") return { error: "This invitation cannot be revoked." };
+  if (row.outcome === "revoked") {
+    await audit(actor, "COMPLIMENTARY_ISSUANCE_REVOKED", "order", order.id, {
+      ref: orderRefFromId(order.id),
+      revoked_count: row.revoked_count,
+    }, ip, ua);
+  }
+  return {
+    ok: true,
+    ref: orderRefFromId(order.id),
+    revoked: row.revoked_count,
+    message: row.revoked_count > 0
+      ? `${row.revoked_count} remaining ${row.revoked_count === 1 ? "pass was" : "passes were"} revoked. Used passes stay used.`
+      : "No valid passes remained.",
+  };
+}
+
+interface CashTier {
+  tier_id: string;
+  name: string;
+  price_cents: number;
+  currency: string;
+  admits: number;
+  capacity: number | null;
+  max_per_order: number;
+  active: boolean;
+  opens_after: string | null;
+  metadata: Record<string, unknown> | null;
+}
+
+async function priceCashSale(eventId: string, rawItems: unknown, promoRaw: unknown) {
+  const parsed = parseCartItems(rawItems);
+  if ("error" in parsed) return { error: "Choose the tickets for this sale." as const };
+  const items = parsed.items as { tierId: string; quantity: number }[];
+  const { data, error } = await admin
+    .from("tiers")
+    .select("tier_id, name, price_cents, currency, admits, capacity, max_per_order, active, opens_after, metadata")
+    .eq("event_id", eventId)
+    .in("tier_id", items.map((item) => item.tierId));
+  if (error) throw error;
+  const tiers = new Map((data ?? []).map((row) => [row.tier_id, row as CashTier]));
+  let admissions = 0;
+  const lines = [];
+  for (const item of items) {
+    const tier = tiers.get(item.tierId);
+    if (!tier || !tier.active) return { error: "This pass isn't available." as const };
+    if (item.quantity > Math.min(tier.max_per_order, 10)) return { error: `Up to ${Math.min(tier.max_per_order, 10)} ${tier.name} per sale.` as const };
+    if (tier.opens_after) {
+      const { data: gate } = await admin.from("tiers").select("active, capacity").eq("event_id", eventId).eq("tier_id", tier.opens_after).maybeSingle();
+      const gateSold = gate?.capacity != null ? await countSold(eventId, tier.opens_after) : 0;
+      const open = !gate || !gate.active || (gate.capacity !== null && gateSold >= gate.capacity);
+      if (!open) return { error: `${tier.name} isn't on sale.` as const };
+    }
+    if (tier.capacity != null) {
+      const sold = await countSold(eventId, tier.tier_id);
+      const held = await countHeld(eventId, tier.tier_id);
+      if (sold + held + item.quantity > tier.capacity) return { error: `${tier.name} does not have enough left.` as const, code: "oversold" as const };
+    }
+    admissions += item.quantity * Math.max(tier.admits, 1);
+    lines.push({ tierId: tier.tier_id, name: tier.name, unitCents: tier.price_cents, quantity: item.quantity, admits: tier.admits });
+  }
+  if (admissions > 20) return { error: "Up to 20 admissions per sale." as const };
+  if (lines.some((line) => line.unitCents == null) || new Set(lines.map(() => tiers.get(lines[0].tierId)?.currency)).size > 1) {
+    return { error: "This pass isn't available." as const };
+  }
+  const currency = tiers.get(lines[0].tierId)?.currency ?? "usd";
+  if ([...tiers.values()].some((tier) => tier.currency !== currency)) return { error: "This pass isn't available." as const };
+
+  const promoCode = normalizePromoCode(promoRaw);
+  if (promoCode === null) return { error: "That promo code is not valid." as const, code: "promo_invalid" as const };
+  let promo: { id: string; code: string; percent: number; eligibleTierIds: string[]; eligibleNames: string[] } | null = null;
+  if (promoCode) {
+    const { data: row, error: promoError } = await admin
+      .from("promotions")
+      .select("id, code, event_id, discount_type, discount_value, active, starts_at, expires_at, eligible_tier_ids")
+      .eq("event_id", eventId)
+      .eq("code", promoCode)
+      .maybeSingle();
+    if (promoError) throw promoError;
+    if (!row || !promotionIsLive(row, eventId)) return { error: "PROMO CODE NOT VALID" as const, code: "promo_invalid" as const };
+    const eligible = eligibleTierIds(row);
+    if (promoHasNoEligibleLine(lines, eligible)) {
+      const { data: named } = await admin.from("tiers").select("tier_id, name").eq("event_id", eventId).in("tier_id", eligible);
+      const names = eligible.map((id) => (named ?? []).find((tier: { tier_id: string; name: string }) => tier.tier_id === id)?.name).filter((name): name is string => Boolean(name));
+      return { error: promoEligibilityMessage(row.code, names) as string, code: "PROMO_NOT_ELIGIBLE" as const };
+    }
+    const { data: named, error: nameError } = await admin.from("tiers").select("tier_id, name").eq("event_id", eventId).in("tier_id", eligible);
+    if (nameError) throw nameError;
+    const namesById = new Map((named ?? []).map((tier: { tier_id: string; name: string }) => [tier.tier_id, tier.name]));
+    promo = {
+      id: row.id,
+      code: row.code,
+      percent: row.discount_value,
+      eligibleTierIds: eligible,
+      eligibleNames: eligible.map((id) => namesById.get(id)).filter((name): name is string => Boolean(name)),
+    };
+  }
+
+  const priced = priceCart(lines, promo ? { percent: promo.percent, eligibleTierIds: promo.eligibleTierIds } : null);
+  let quoted: { tax: number; total: number; calculationId: string };
+  try {
+    quoted = await quoteCartTotal(
+      taxClient(),
+      currency,
+      priced.lines.map((line: { discountedLineCents: number; tierId: string }) => ({ amount: line.discountedLineCents, reference: line.tierId })),
+    );
+  } catch (err) {
+    console.error(JSON.stringify({ msg: "cash_tax_quote_failed", eventId, error: (err as Error).message?.slice(0, 200) }));
+    return { error: "Tax could not be calculated. Nothing was issued." as const };
+  }
+  const snapshot = buildCartSnapshot({
+    priced,
+    tax: quoted.tax,
+    currency,
+    promo: promo ? { id: promo.id, code: promo.code, percent: promo.percent, eligibleTierIds: promo.eligibleTierIds } : null,
+  });
+  return { items, priced, quoted, snapshot, promo, currency, admissions };
+}
+
+function taxClient() {
+  const key = Deno.env.get("STRIPE_SECRET_KEY");
+  if (!key) throw new Error("tax_unavailable");
+  return new Stripe(key, { httpClient: Stripe.createFetchHttpClient() });
+}
+
+async function countSold(eventId: string, tierId: string) {
+  const { data, error } = await admin.rpc("tier_sold", { p_event_id: eventId, p_tier_id: tierId });
+  if (error) throw error;
+  return Number(data ?? 0);
+}
+
+async function countHeld(eventId: string, tierId: string) {
+  const { data, error } = await admin.rpc("tier_held", { p_event_id: eventId, p_tier_id: tierId });
+  if (error) throw error;
+  return Number(data ?? 0);
+}
+
+function cashPreview(priced: ReturnType<typeof priceCashSale> extends Promise<infer R> ? R : never) {
+  if (!priced || "error" in priced) return priced;
+  return {
+    lines: priced.priced.lines.map((line: { tierId: string; name: string; quantity: number; totalAdmissions: number; originalLineCents: number; discountCents: number; discountedLineCents: number; promoEligible: boolean }) => ({
+      ticketType: line.tierId,
+      name: line.name,
+      quantity: line.quantity,
+      admissions: line.totalAdmissions,
+      lineSubtotal: line.originalLineCents,
+      discount: line.discountCents,
+      discountedSubtotal: line.discountedLineCents,
+      promoEligible: line.promoEligible,
+    })),
+    totalAdmissions: priced.admissions,
+    originalSubtotal: priced.priced.originalSubtotal,
+    discount: priced.priced.discount,
+    discountedSubtotal: priced.priced.discountedSubtotal,
+    tax: priced.quoted.tax,
+    total: priced.quoted.total,
+    currency: priced.currency,
+    promo: priced.promo ? { code: priced.promo.code, percent: priced.promo.percent, eligibleNames: priced.promo.eligibleNames } : null,
+  };
+}
+
+async function cashQuote(body: Record<string, unknown>) {
+  const eventId = textEvent(body);
+  if (!eventId) return { error: "eventId required" };
+  const priced = await priceCashSale(eventId, body.items, body.promoCode);
+  if ("error" in priced) return priced;
+  return cashPreview(priced);
+}
+
+async function eventMetadata(eventId: string): Promise<Record<string, string>> {
+  const { data, error } = await admin.from("tiers").select("metadata").eq("event_id", eventId);
+  if (error) throw error;
+  const meta = (data ?? []).map((row) => row.metadata).find((value) => value && typeof value === "object" && (value as Record<string, unknown>).omc_event_name);
+  const out: Record<string, string> = {};
+  if (meta && typeof meta === "object") {
+    for (const [key, value] of Object.entries(meta as Record<string, unknown>)) {
+      if (typeof value === "string") out[key] = value;
+    }
+  }
+  return out;
+}
+
+async function cashIssue(actor: Actor, body: Record<string, unknown>, ip: string, ua: string) {
+  const eventId = textEvent(body);
+  const name = parseComplimentaryName(body.name);
+  const email = parseStaffEmail(body.email);
+  const phone = parseVipPhone(body.phone);
+  const idempotencyKey = parseIdempotencyKey(body.idempotencyKey);
+  const expected = typeof body.expectedTotal === "number" ? body.expectedTotal : Number(body.expectedTotal);
+  if (!cashReceivedPhraseOk(body.confirm)) return { error: "Confirm that the cash was received." };
+  if (!eventId || !name || !email || phone == null || !idempotencyKey || !Number.isInteger(expected)) {
+    return { error: "A name, email, and the quoted total are required." };
+  }
+  const priced = await priceCashSale(eventId, body.items, body.promoCode);
+  if ("error" in priced) return priced;
+  if (priced.quoted.total !== expected) return { error: "The amount changed. Review the sale again.", code: "amount_changed" };
+  const { data, error } = await admin.rpc("create_cash_order", {
+    p_event_id: eventId,
+    p_items: priced.items.map((item) => ({ tier_id: item.tierId, quantity: item.quantity })),
+    p_snapshot: priced.snapshot,
+    p_name: name,
+    p_email: email,
+    p_phone: phone,
+    p_idempotency_key: idempotencyKey,
+    p_issued_by: actor.id,
+  });
+  if (error) throw error;
+  const row = (Array.isArray(data) ? data[0] : data) as { order_id: string | null; outcome: string } | null;
+  if (row?.outcome === "oversold") return { error: "One of these tickets sold out. Nothing was issued.", code: "oversold" };
+  if (row?.outcome === "unavailable") return { error: "This pass isn't available. Nothing was issued." };
+  if (row?.outcome === "idempotency_mismatch") return { error: "This confirmation was already used with different details." };
+  if (!row?.order_id || row.outcome === "rejected") return { error: "The cash sale could not be issued. Nothing was left half-created." };
+  if (row.outcome === "created") {
+    await audit(actor, "CASH_SALE_ISSUED", "order", row.order_id, {
+      ref: orderRefFromId(row.order_id),
+      total: priced.quoted.total,
+      admissions: priced.admissions,
+      promo: priced.promo?.code ?? "",
+    }, ip, ua);
+  }
+  let emailStatus = "Not sent";
+  try {
+    const delivery = await sendOrderTicketEmail(row.order_id, await eventMetadata(eventId));
+    emailStatus = delivery.status === "not_sendable" ? "Not sent" : "Sent";
+  } catch (err) {
+    console.error(JSON.stringify({ msg: "cash_email_failed", orderId: row.order_id, error: (err as Error).message?.slice(0, 200) }));
+  }
+  return {
+    ok: true,
+    created: row.outcome === "created",
+    ref: orderRefFromId(row.order_id),
+    total: priced.quoted.total,
+    currency: priced.currency,
+    emailStatus,
+    message: row.outcome === "created"
+      ? `Cash sale recorded. ${emailStatus === "Sent" ? `Passes were sent to ${email}.` : "The passes exist, but the email was not sent."}`
+      : `This confirmation was already recorded as ${orderRefFromId(row.order_id)}.`,
+  };
+}
+
+async function cashRefund(actor: Actor, body: Record<string, unknown>, ip: string, ua: string) {
+  const eventId = textEvent(body);
+  const prefix = parseOrderRef(body.ref);
+  if (!cashReturnedPhraseOk(body.confirm)) return { error: "Confirm that the cash was returned to the customer." };
+  if (!eventId || !prefix) return { error: "Order not found" };
+  const ids = await idsWithPrefix("orders", eventId, prefix);
+  if (ids.length !== 1) return { error: "Order not found" };
+  const { data: existing, error: readError } = await admin
+    .from("orders")
+    .select("id, payment_method, status, stripe_payment_intent, is_test")
+    .eq("id", ids[0])
+    .eq("event_id", eventId)
+    .eq("is_test", false)
+    .maybeSingle();
+  if (readError) throw readError;
+  if (!existing || existing.payment_method !== "cash") return { error: "This is not a cash sale." };
+  if (existing.stripe_payment_intent) return { error: "This order has a card charge. Use the card refund." };
+  const { data, error } = await admin.rpc("refund_cash_order", {
+    p_event_id: eventId,
+    p_order_id: existing.id,
+    p_actor: actor.id,
+  });
+  if (error) throw error;
+  const row = (Array.isArray(data) ? data[0] : data) as { outcome: string; cancelled_count: number } | null;
+  if (!row || row.outcome === "not_found") return { error: "Order not found" };
+  if (row.outcome === "admitted") {
+    return { error: "CASH REFUND NOT AVAILABLE. One or more tickets from this order have already been admitted." };
+  }
+  if (row.outcome === "rejected") return { error: "This cash sale cannot be refunded." };
+  if (row.outcome === "refunded") {
+    await audit(actor, "CASH_SALE_REFUNDED", "order", existing.id, {
+      ref: orderRefFromId(existing.id),
+      cancelled_passes: row.cancelled_count,
+    }, ip, ua);
+  }
+  return {
+    ok: true,
+    ref: orderRefFromId(existing.id),
+    outcome: row.outcome,
+    cancelled: row.cancelled_count,
+    message: row.outcome === "exists"
+      ? "This cash sale was already refunded."
+      : "The cash sale was refunded. Every pass was cancelled and the inventory was restored.",
+  };
+}
+
 
 async function audit(
   actor: { id: string; role: string } | null,

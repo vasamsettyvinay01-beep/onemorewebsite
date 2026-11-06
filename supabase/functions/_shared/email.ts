@@ -32,7 +32,8 @@ export type TicketEmail = Omit<PassEmail, "passes" | "ticketsUrl" | "sealUrl" | 
 
 export interface SaleNotification {
   orderId: string;
-  paymentIntentId: string;
+  paymentIntentId?: string;
+  paymentMethod?: string;
   eventName: string;
   purchaserName: string | null;
   purchaserEmail: string;
@@ -183,7 +184,8 @@ export async function sendSaleNotification(sale: SaleNotification): Promise<void
         ]),
     ["Paid", total],
     ["Order", sale.orderId],
-    ["Payment", sale.paymentIntentId],
+    ...(sale.paymentMethod ? [["Payment method", sale.paymentMethod] as [string, string]] : []),
+    ...(sale.paymentIntentId ? [["Payment", sale.paymentIntentId] as [string, string]] : []),
   ];
   const htmlRows = rows
     .map(

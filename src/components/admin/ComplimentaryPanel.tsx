@@ -14,6 +14,7 @@ interface ComplimentaryEntry {
   issued: number;
   used: number;
   remaining: number;
+  revoked: number;
   status: string;
   emailStatus: string;
   createdAt: string;
@@ -25,6 +26,7 @@ interface ComplimentaryList {
   issued: number;
   admitted: number;
   remaining: number;
+  revoked: number;
   page: number;
   pageSize: number;
   total: number;
@@ -69,6 +71,7 @@ function ComplimentaryDesk() {
   const [loaded, setLoaded] = useState<{ key: string; body: ComplimentaryList | null; error: string | null } | null>(null);
   const [busy, setBusy] = useState(false);
   const [retrying, setRetrying] = useState<string | null>(null);
+  const [openRef, setOpenRef] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const requestKey = `${eventId}|${page}|${nonce}`;
@@ -215,10 +218,11 @@ function ComplimentaryDesk() {
         )}
       </form>
 
-      <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
+      <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
         <Stat label="Complimentary issued" value={current?.body?.issued ?? "—"} hint="Not paid revenue" />
-        <Stat label="Complimentary admitted" value={current?.body?.admitted ?? "—"} hint={event.name} />
-        <Stat label="Complimentary remaining" value={current?.body?.remaining ?? "—"} hint="Still valid at the door" />
+        <Stat label="Used" value={current?.body?.admitted ?? "—"} hint={event.name} />
+        <Stat label="Valid" value={current?.body?.remaining ?? "—"} hint="Still accepted at the door" />
+        <Stat label="Revoked" value={current?.body?.revoked ?? "—"} hint="Not remaining" />
       </div>
 
       <h2 className="mt-6 text-sm font-semibold">Issuance history</h2>
@@ -235,7 +239,8 @@ function ComplimentaryDesk() {
                   <th className="px-3 py-2 font-medium">Email</th>
                   <th className="px-3 py-2 font-medium">Issued</th>
                   <th className="px-3 py-2 font-medium">Used</th>
-                  <th className="px-3 py-2 font-medium">Remaining</th>
+                  <th className="px-3 py-2 font-medium">Valid</th>
+                  <th className="px-3 py-2 font-medium">Revoked</th>
                   <th className="px-3 py-2 font-medium">Status</th>
                   <th className="px-3 py-2 font-medium">Issued at</th>
                   <th className="px-3 py-2 font-medium">Issued by</th>
@@ -250,24 +255,140 @@ function ComplimentaryDesk() {
                     <td className="px-3 py-2">{entry.issued}</td>
                     <td className="px-3 py-2">{entry.used}</td>
                     <td className="px-3 py-2">{entry.remaining}</td>
+                    <td className="px-3 py-2">{entry.revoked}</td>
                     <td className="px-3 py-2"><Chip tone={toneFor(entry.status)}>{entry.status}</Chip></td>
                     <td className="px-3 py-2 text-white/55">{new Date(entry.createdAt).toLocaleString()}</td>
                     <td className="px-3 py-2 text-white/55">{entry.issuedBy ?? "—"}</td>
                     <td className="px-3 py-2">
-                      {entry.emailStatus === "Not sent" && (
-                        <button type="button" className={quietButton} disabled={retrying !== null} onClick={() => void retry(entry)}>
-                          {retrying === entry.ref ? "Sending…" : "Retry email"}
+                      <div className="flex flex-wrap gap-2">
+                        <button type="button" className={quietButton} onClick={() => setOpenRef(openRef === entry.ref ? null : entry.ref)}>
+                          {openRef === entry.ref ? "Hide" : "Passes"}
                         </button>
-                      )}
+                        {entry.remaining > 0 ? (
+                          <button type="button" className={quietButton} disabled={retrying !== null} onClick={() => void retry(entry)}>
+                            {retrying === entry.ref ? "Sending…" : entry.emailStatus === "Not sent" ? "Retry email" : "Resend valid"}
+                          </button>
+                        ) : (
+                          <span className="text-xs text-white/45">No valid passes remain</span>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
+          {openRef && <IssuanceDetail eventId={eventId} entryRef={openRef} onChanged={() => setNonce((value) => value + 1)} />}
           <Pager page={current.body.page} pageSize={current.body.pageSize} total={current.body.total} onPage={setPage} />
         </>
       )}
     </div>
+  );
+}
+
+interface PassRow {
+  guestNumber: number;
+  status: "VALID" | "USED" | "REVOKED" | string;
+}
+
+function IssuanceDetail({ eventId, entryRef, onChanged }: { eventId: string; entryRef: string; onChanged: () => void }) {
+  const [passes, setPasses] = useState<PassRow[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [confirmPass, setConfirmPass] = useState<number | null>(null);
+  const [confirmAll, setConfirmAll] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [nonce, setNonce] = useState(0);
+
+  useEffect(() => {
+    let cancel = false;
+    adminCall<{ passes: PassRow[] }>("complimentary_view", { eventId, ref: entryRef })
+      .then((body) => {
+        if (!cancel) setPasses(body.passes);
+      })
+      .catch((err: unknown) => {
+        if (!cancel) setError(err instanceof AdminApiError ? err.message : "Could not load these passes.");
+      });
+    return () => {
+      cancel = true;
+    };
+  }, [eventId, entryRef, nonce]);
+
+  async function revokePass(guestNumber: number) {
+    setBusy(true);
+    setError(null);
+    try {
+      await adminCall("revoke_complimentary_pass", { eventId, ref: entryRef, guestNumber, confirm: "REVOKE PASS" });
+      setConfirmPass(null);
+      setNonce((value) => value + 1);
+      onChanged();
+    } catch (err: unknown) {
+      setError(err instanceof AdminApiError ? err.message : "The pass could not be revoked.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function revokeRemaining() {
+    setBusy(true);
+    setError(null);
+    try {
+      await adminCall("revoke_complimentary_issuance", { eventId, ref: entryRef, confirm: "REVOKE REMAINING" });
+      setConfirmAll(false);
+      setNonce((value) => value + 1);
+      onChanged();
+    } catch (err: unknown) {
+      setError(err instanceof AdminApiError ? err.message : "The invitation could not be revoked.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const remaining = passes?.filter((pass) => pass.status === "VALID").length ?? 0;
+
+  return (
+    <section className="mt-3 rounded-lg border border-white/10 bg-[#171916] p-3" aria-label="Issuance passes">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-sm font-semibold">{entryRef}</h3>
+        {remaining > 0 && !confirmAll && (
+          <button type="button" className={quietButton} disabled={busy} onClick={() => setConfirmAll(true)}>Revoke remaining passes</button>
+        )}
+      </div>
+      {error && <div className="mt-2"><ErrorNote>{error}</ErrorNote></div>}
+      {confirmAll && (
+        <div className="mt-3 rounded-md border border-white/10 p-3 text-sm">
+          <p>Revoke every pass that has not been used?</p>
+          <p className="mt-1 text-white/55">Used passes stay used. Revoked passes will no longer be accepted at the door.</p>
+          <div className="mt-3 flex gap-2">
+            <button type="button" className={quietButton} onClick={() => setConfirmAll(false)}>Cancel</button>
+            <button type="button" className="h-9 rounded-md bg-[#eceae4] px-3 text-sm font-semibold text-[#141513] disabled:opacity-40" disabled={busy} onClick={() => void revokeRemaining()}>
+              Revoke remaining
+            </button>
+          </div>
+        </div>
+      )}
+      {!passes && !error && <p className="mt-2 text-sm text-white/50">Loading passes…</p>}
+      {passes && (
+        <ul className="mt-3 divide-y divide-white/10">
+          {passes.map((pass) => (
+            <li key={pass.guestNumber} className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
+              <span>Pass {pass.guestNumber}</span>
+              <span className="text-white/70">{pass.status}</span>
+              {pass.status === "VALID" && confirmPass !== pass.guestNumber && (
+                <button type="button" className={quietButton} disabled={busy} onClick={() => setConfirmPass(pass.guestNumber)}>Revoke pass</button>
+              )}
+              {confirmPass === pass.guestNumber && (
+                <span className="flex flex-wrap items-center gap-2 text-white/70">
+                  Revoke Pass {pass.guestNumber}? This pass will no longer be accepted at the door.
+                  <button type="button" className={quietButton} onClick={() => setConfirmPass(null)}>Cancel</button>
+                  <button type="button" className="h-9 rounded-md bg-[#eceae4] px-3 text-sm font-semibold text-[#141513] disabled:opacity-40" disabled={busy} onClick={() => void revokePass(pass.guestNumber)}>
+                    Revoke pass
+                  </button>
+                </span>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }

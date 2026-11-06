@@ -47,12 +47,14 @@ export interface PassEmail {
     tax: string;
     total: string;
     totalLabel?: string;
+    paymentMethod?: string;
   };
 }
 
 function receiptBlock(receipt: PassEmail["receipt"]): string {
   if (!receipt) return "";
   const rows: [string, string][] = [
+    ...(receipt.paymentMethod ? ([["Payment method", receipt.paymentMethod]] as [string, string][]) : []),
     ...(receipt.promo ? ([["Promo", receipt.promo]] as [string, string][]) : []),
     [receipt.promo && !receipt.discountLabel ? "Original ticket subtotal" : "Original subtotal", receipt.originalSubtotal],
     ...(receipt.discount ? ([[receipt.discountLabel ?? "Discount", receipt.discount]] as [string, string][]) : []),
@@ -272,6 +274,7 @@ export function renderPassEmail(input: PassEmail): { subject: string; html: stri
     "",
     ...(d.receipt
       ? [
+          ...(d.receipt.paymentMethod ? [`Payment method: ${d.receipt.paymentMethod}`] : []),
           ...(d.receipt.promo ? [`Promo: ${d.receipt.promo}`] : []),
           `${d.receipt.promo && !d.receipt.discountLabel ? "Original ticket subtotal" : "Original subtotal"}: ${d.receipt.originalSubtotal}`,
           ...(d.receipt.discount ? [`${d.receipt.discountLabel ?? "Discount"}: ${d.receipt.discount}`] : []),

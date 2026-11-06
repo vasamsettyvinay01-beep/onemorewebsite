@@ -25,7 +25,7 @@ export async function sendOrderTicketEmail(
 ): Promise<OrderEmailResult> {
   const { data: order, error: orderErr } = await admin
     .from("orders")
-    .select("status, access_token, emailed_at, purchaser_name, purchaser_email, tier_name, quantity, amount_total, currency, promo_code, discount_percent, original_subtotal_cents, discount_amount_cents, tax_cents, tickets(guest_number, token, status, tier_id), order_items(position, tier_id, display_name_snapshot, quantity, total_admissions, promo_eligible)")
+    .select("status, access_token, emailed_at, purchaser_name, purchaser_email, tier_name, quantity, amount_total, currency, payment_method, promo_code, discount_percent, original_subtotal_cents, discount_amount_cents, tax_cents, tickets(guest_number, token, status, tier_id), order_items(position, tier_id, display_name_snapshot, quantity, total_admissions, promo_eligible)")
     .eq("id", orderId)
     .single();
   if (orderErr) throw orderErr;
@@ -67,8 +67,10 @@ export async function sendOrderTicketEmail(
         }))
         .filter((group) => group.tickets.length > 0)
     : undefined;
+  const isCash = order.payment_method === "cash";
   const receipt = isCart
     ? {
+        ...(isCash ? { paymentMethod: "CASH" } : {}),
         ...(cartPromoLabel ? { promo: cartPromoLabel } : {}),
         originalSubtotal: money(order.original_subtotal_cents!, order.currency),
         ...(cartPromoLabel
@@ -113,11 +115,12 @@ export async function sendOrderTicketEmail(
     });
     console.log(JSON.stringify({ msg: "email_sent", orderId, tickets: tickets.length }));
 
-    if (paymentIntentId) {
+    if (paymentIntentId || isCash) {
       try {
         await sendSaleNotification({
           orderId,
           paymentIntentId,
+          paymentMethod: isCash ? "CASH" : undefined,
           eventName: metadata.omc_event_name ?? "One More",
           purchaserName: order.purchaser_name,
           purchaserEmail: order.purchaser_email,

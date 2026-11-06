@@ -18,6 +18,10 @@ export const OPEN_MUTATIONS = [
   "staff_set",
   "issue_complimentary",
   "resend_complimentary",
+  "revoke_complimentary_pass",
+  "revoke_complimentary_issuance",
+  "cash_issue",
+  "cash_refund",
   "vip_issue",
   "vip_resend",
   "vip_revoke",
@@ -35,7 +39,9 @@ export const READ_ACTIONS = [
   "sales",
   "audit",
   "complimentary_list",
+  "complimentary_view",
   "complimentary_preview",
+  "cash_quote",
   "promo_report",
   "vip_list",
   "vip_view",
@@ -104,6 +110,46 @@ export function parseIdempotencyKey(value) {
 
 export function complimentaryPhraseOk(value) {
   return value === "SEND";
+}
+
+export function cashReceivedPhraseOk(value) {
+  return value === "CASH RECEIVED";
+}
+
+export function cashReturnedPhraseOk(value) {
+  return value === "I confirm the cash amount has been returned to the customer.";
+}
+
+export function parseGuestNumber(value) {
+  const guest = typeof value === "string" && /^\d+$/.test(value.trim()) ? Number(value) : Number(value);
+  return Number.isInteger(guest) && guest >= 1 && guest <= 20 ? guest : null;
+}
+
+export function parsePaymentMethod(value) {
+  if (value == null || value === "") return "";
+  return value === "card" || value === "cash" ? value : null;
+}
+
+/** Issued / used / still-valid / revoked. Revoked passes are not remaining. */
+export function complimentaryPassCounts(tickets) {
+  const rows = Array.isArray(tickets) ? tickets : [];
+  return {
+    issued: rows.length,
+    used: rows.filter((ticket) => ticket.status === "checked-in").length,
+    remaining: rows.filter((ticket) => ticket.status === "valid").length,
+    revoked: rows.filter((ticket) => ticket.status === "revoked").length,
+  };
+}
+
+/** Derived from the passes. There is no stored status to edit. */
+export function complimentaryIssuanceStatus(tickets) {
+  const counts = complimentaryPassCounts(tickets);
+  if (counts.issued === 0) return "Active";
+  if (counts.revoked === counts.issued) return "Revoked";
+  if (counts.revoked > 0) return "Partially revoked";
+  if (counts.remaining === 0 && counts.used === counts.issued) return "Fully used";
+  if (counts.used > 0 && counts.remaining > 0) return "Partially used";
+  return "Active";
 }
 
 export function parseStaffRole(value) {
@@ -226,6 +272,7 @@ export function emailLabel(emailedAt) {
 
 export function displayTicketStatus(ticketStatus, orderStatus) {
   if (ticketStatus === "checked-in") return "CHECKED IN";
+  if (ticketStatus === "revoked") return "REVOKED";
   if (ticketStatus === "valid") return "VALID";
   if (orderStatus === "refunded" || orderStatus === "partially-refunded") return "REFUNDED";
   if (ticketStatus === "cancelled") return "CANCELLED";
@@ -235,6 +282,7 @@ export function displayTicketStatus(ticketStatus, orderStatus) {
 export function displayScanResult(outcome, orderStatus) {
   if (outcome === "admitted") return "CHECKED IN";
   if (outcome === "already-used") return "ALREADY USED";
+  if (outcome === "revoked") return "REVOKED";
   if (outcome === "cancelled" && (orderStatus === "refunded" || orderStatus === "partially-refunded")) return "REFUNDED";
   if (outcome === "cancelled") return "CANCELLED";
   return "INVALID";

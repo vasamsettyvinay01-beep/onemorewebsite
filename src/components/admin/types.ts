@@ -56,6 +56,13 @@ export interface OrderRecord {
   total: number;
   currency: string;
   paymentStatus: string;
+  paymentMethod?: string;
+  cashReceived?: number | null;
+  paidAt?: string | null;
+  issuedBy?: string | null;
+  cashRefundedAt?: string | null;
+  cashRefundedBy?: string | null;
+  cashRefundCents?: number | null;
   refundStatus: string;
   emailStatus: string;
   createdAt: string;
@@ -146,6 +153,9 @@ export interface Overview {
   ticketSubtotal: number | null;
   taxCollected: number | null;
   refundedAmount: number;
+  cardSales?: number;
+  cashSales?: number;
+  paidSales?: number;
   cancelledPasses: number;
   activeHolds: number;
   totalsComplete: boolean;
@@ -177,7 +187,7 @@ export interface AdminEvent {
   unitsSold: number;
   admissionsSold: number;
   passesIssued: number;
-  tiers: { id: string; name: string; priceCents: number; admits: number; capacity: number | null; active: boolean }[];
+  tiers: { id: string; name: string; priceCents: number; admits: number; capacity: number | null; remaining: number | null; soldOut?: boolean; active: boolean }[];
   promoCodes?: string[];
 }
 

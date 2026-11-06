@@ -544,6 +544,7 @@ const VERDICTS = {
   admitted: { bg: "bg-emerald-600", title: "Valid" },
   "already-used": { bg: "bg-amber-500", title: "Already used" },
   cancelled: { bg: "bg-red-600", title: "Cancelled" },
+  revoked: { bg: "bg-red-600", title: "REVOKED" },
   "wrong-event": { bg: "bg-red-600", title: "Wrong event" },
   "not-found": { bg: "bg-red-600", title: "Invalid" },
   error: { bg: "bg-zinc-700", title: "No connection" },
@@ -584,6 +585,12 @@ function Verdict({ result, onDismiss }: { result: ScanResult | { outcome: "error
         </span>
       )}
       {result.outcome === "cancelled" && <span className="mt-5 text-lg">This ticket was refunded.</span>}
+      {result.outcome === "revoked" && (
+        <span className="mt-5 text-lg font-semibold uppercase tracking-[0.14em]">
+          Complimentary admission
+          <span className="mt-2 block text-base">This pass is no longer valid</span>
+        </span>
+      )}
       {result.outcome === "wrong-event" && <span className="mt-5 text-lg">This ticket is for a different event.</span>}
       {result.outcome === "not-found" && <span className="mt-5 text-lg">Not a One More ticket.</span>}
       {result.outcome === "error" && <span className="mt-5 text-lg">Couldn&apos;t verify. Check signal and scan again.</span>}

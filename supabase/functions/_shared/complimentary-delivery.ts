@@ -22,7 +22,10 @@ function qr(value: string): Promise<string> {
   });
 }
 
-export async function sendComplimentaryInvitation(orderId: string): Promise<"sent" | "already_sent" | "not_sendable"> {
+export async function sendComplimentaryInvitation(
+  orderId: string,
+  options: { force?: boolean } = {},
+): Promise<"sent" | "already_sent" | "not_sendable" | "none_valid"> {
   const { data: order, error } = await admin
     .from("orders")
     .select("event_id, status, emailed_at, purchaser_name, purchaser_email, quantity, is_complimentary, tickets(guest_number, token, status)")
@@ -30,11 +33,14 @@ export async function sendComplimentaryInvitation(orderId: string): Promise<"sen
     .single();
   if (error) throw error;
   if (!order.is_complimentary || order.status === "refunded") return "not_sendable";
-  const tickets = [...order.tickets].filter((ticket) => ticket.status !== "cancelled").sort((a, b) => a.guest_number - b.guest_number);
-  if (!tickets.length) return "not_sendable";
-  if (order.emailed_at) return "already_sent";
+  // Resend never creates passes. Only passes that are still valid go out.
+  const tickets = [...order.tickets].filter((ticket) => ticket.status === "valid").sort((a, b) => a.guest_number - b.guest_number);
+  if (!tickets.length) return "none_valid";
+  if (order.emailed_at && !options.force) return "already_sent";
 
-  const claim = await admin.from("orders").update({ emailed_at: new Date().toISOString() }).eq("id", orderId).is("emailed_at", null).select("id");
+  const claim = options.force
+    ? await admin.from("orders").update({ emailed_at: new Date().toISOString() }).eq("id", orderId).select("id")
+    : await admin.from("orders").update({ emailed_at: new Date().toISOString() }).eq("id", orderId).is("emailed_at", null).select("id");
   if (claim.error) throw claim.error;
   if (!claim.data?.length) return "already_sent";
 

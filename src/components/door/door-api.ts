@@ -23,7 +23,7 @@ function activeClient(): SupabaseClient {
   return activeSource === "staff" ? adminAuth() : doorAuth();
 }
 
-export type ScanOutcome = "admitted" | "already-used" | "cancelled" | "wrong-event" | "not-found";
+export type ScanOutcome = "admitted" | "already-used" | "cancelled" | "revoked" | "wrong-event" | "not-found";
 
 export interface ScanResult {
   outcome: ScanOutcome;

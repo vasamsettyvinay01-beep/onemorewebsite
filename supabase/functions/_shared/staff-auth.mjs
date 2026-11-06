@@ -34,6 +34,12 @@ export const PERMISSIONS = {
   promo_report: ["super_admin"],
   issue_complimentary: ["super_admin"],
   resend_complimentary: ["super_admin"],
+  complimentary_view: ["super_admin"],
+  revoke_complimentary_pass: ["super_admin"],
+  revoke_complimentary_issuance: ["super_admin"],
+  cash_quote: ["super_admin"],
+  cash_issue: ["super_admin"],
+  cash_refund: ["super_admin"],
   vip_list: ["super_admin"],
   vip_view: ["super_admin"],
   vip_preview: ["super_admin"],
@@ -134,6 +140,8 @@ const READ_LIMITS = new Set([
   "audit",
   "complimentary_list",
   "complimentary_preview",
+  "complimentary_view",
+  "cash_quote",
   "promo_report",
   "vip_list",
   "vip_view",
@@ -148,6 +156,10 @@ export function rateLimitFor(action) {
     || action === "cancel_confirm"
     || action === "issue_complimentary"
     || action === "resend_complimentary"
+    || action === "revoke_complimentary_pass"
+    || action === "revoke_complimentary_issuance"
+    || action === "cash_issue"
+    || action === "cash_refund"
     || action === "vip_revoke"
   ) {
     return { limit: action === "login_failed" ? 8 : 5, windowSeconds: 600 };

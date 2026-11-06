@@ -159,7 +159,7 @@ Deno.serve(async (req) => {
           vip.admitted += row.admitted;
           if (row.status !== "revoked" && row.status !== "cancelled") vip.allocated += row.capacity;
         }
-        const live = tickets.filter((t) => t.status !== "cancelled");
+        const live = tickets.filter((t) => t.status !== "cancelled" && t.status !== "revoked");
         const byTier: Record<string, { sold: number; in: number }> = {};
         for (const t of live) {
           byTier[t.tier_id] ??= { sold: 0, in: 0 };
