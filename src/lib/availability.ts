@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { OneMoreEvent } from "@/types/event";
 import { backendConfigured, functionUrl } from "@/data/backend";
+import { applyAvailability } from "@/lib/availability-rules";
 
 type Counts = Record<string, number>;
 
@@ -32,14 +33,6 @@ export function useLiveEvent(event: OneMoreEvent | null, active: boolean): OneMo
 
   return useMemo(() => {
     if (!event || !sold || sold.eventId !== event.id) return event;
-    return {
-      ...event,
-      ticketTiers: event.ticketTiers.map((t) => {
-        if (t.capacity === undefined) return t;
-        const paid = sold.sold[t.id] ?? 0;
-        const held = sold.held[t.id] ?? 0;
-        return { ...t, soldOut: paid >= t.capacity, unavailable: paid + held >= t.capacity };
-      }),
-    };
+    return applyAvailability(event, sold.sold, sold.held);
   }, [event, sold]);
 }

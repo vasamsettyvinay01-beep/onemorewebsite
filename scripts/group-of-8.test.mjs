@@ -6,6 +6,7 @@ import { readFileSync } from "node:fs";
 import { EVENT, GISO15_ID, openDatabase, seedTiers } from "./pg-harness.mjs";
 import { events } from "../src/data/events.ts";
 import { canIncrease, cartAdmissions, clampQuantities, MAX_CART_ADMISSIONS } from "../src/lib/cart.ts";
+import { applyAvailability } from "../src/lib/availability-rules.ts";
 import { buildCartSnapshot, parseCartItems, priceCart, promoHasNoEligibleLine, NON_PUBLIC_TIER_IDS } from "../supabase/functions/_shared/cart.mjs";
 import { promoEligibilityMessage, promotionAppliesToTier } from "../supabase/functions/_shared/promo.mjs";
 import { renderPassEmail } from "../supabase/functions/_shared/pass-email.ts";
@@ -101,6 +102,7 @@ test("Group of 8 is a public paid tier: $139.99, admits 8, alongside the other p
   assert.equal(group8.name, "Group of 8");
   assert.equal(group8.priceCents, 13999);
   assert.equal(group8.admits, 8);
+  assert.equal(group8.capacity, 3, "temporary cap: 3 packages, i.e. 24 admissions");
   assert.ok(!group8.hidden && !group8.priceOnRequest && !group8.soldOut);
   assert.deepEqual(
     tiers.filter((t) => !t.hidden).map((t) => [t.id, t.admits ?? 1]),
@@ -189,6 +191,7 @@ test("Group of 8 × 2 issues 16 passes and consumes two inventory units; × 3 is
 });
 
 test("Group of 8 mixes with Female, Male and Couple inside the 20-admission cap", async () => {
+  await setCap(null); // this test is about the admission limit, not package inventory
   for (const other of ["female", "general", "couple"]) {
     const admits = other === "couple" ? 2 : 1;
     const out = await buy([{ tierId: other, quantity: 1 }, { tierId: "group-8", quantity: 1 }]);
@@ -334,6 +337,157 @@ test("admin order detail reports units, admissions per unit and total admissions
   const panel = read("src/components/admin/OrdersPanel.tsx");
   assert.match(panel, /order\.units\} units · \{order\.admissions\} admissions/);
   assert.match(panel, /line\.admissions/);
+});
+
+// ── Package cap. tiers.capacity counts Group of 8 packages, not people. ──────────
+
+const setCap = (units) => db.query("update tiers set capacity = $1 where tier_id = 'group-8'", [units]);
+const legacyHold = (quantity, key = nextKey()) =>
+  db.query("select * from reserve_passes($1, 'group-8', $2, $3)", [EVENT, quantity, key]).then(
+    (r) => ({ ok: true, ...r.rows[0] }),
+    (err) => ({ ok: false, error: String(err.message) }),
+  );
+
+test("the cap counts packages: capacity 2 sells two Group of 8 (16 admissions) and refuses a third", async () => {
+  await setCap(2);
+  const first = await buy([{ tierId: "group-8", quantity: 1 }]);
+  assert.equal((await tickets(first.order_id)).length, 8, "8 admissions still issued per package");
+  assert.equal(await sold("group-8"), 1);
+  const second = await buy([{ tierId: "group-8", quantity: 1 }]);
+  assert.equal(second.outcome, "created");
+  assert.equal(await sold("group-8"), 2);
+  const third = await reserve([{ tierId: "group-8", quantity: 1 }]);
+  assert.equal(third.ok, false);
+  assert.match(third.error, /sold_out:group-8/);
+  assert.equal((await legacyHold(1)).ok, false, "the single-ticket hold refuses it too");
+});
+
+test("sold + held + requested must fit: a live hold on the last package blocks every other path", async () => {
+  await setCap(1);
+  const holder = await reserve([{ tierId: "group-8", quantity: 1 }]);
+  assert.ok(holder.ok, holder.error);
+  const cartRival = await reserve([{ tierId: "group-8", quantity: 1 }]);
+  assert.match(cartRival.error, /sold_out:group-8/);
+  const legacyRival = await legacyHold(1);
+  assert.equal(legacyRival.ok, false);
+  assert.match(legacyRival.error, /sold_out/);
+  const cashRival = await cash([{ tierId: "group-8", quantity: 1 }]);
+  assert.equal(cashRival.outcome, "oversold");
+  assert.equal(cashRival.order_id, null);
+  // The hold expires: the package is free again.
+  await db.query("update checkout_holds set expires_at = now() - interval '1 minute'");
+  assert.ok((await reserve([{ tierId: "group-8", quantity: 1 }])).ok);
+});
+
+test("two buyers racing for the last package: one hold, one refusal, no oversell", async () => {
+  await setCap(1);
+  const [a, b] = await Promise.all([legacyHold(1), reserve([{ tierId: "group-8", quantity: 1 }])]);
+  assert.equal([a.ok, b.ok].filter(Boolean).length, 1, "exactly one buyer holds the last package");
+  assert.equal(Number((await one("select tier_held($1, 'group-8') as n", [EVENT])).n), 1);
+  assert.equal((await rows("select 1 from checkout_holds")).length, 1, "the refused buyer holds nothing");
+});
+
+test("a mixed cart fails whole when Group of 8 is sold out: no Female hold is left behind", async () => {
+  await setCap(1);
+  await buy([{ tierId: "group-8", quantity: 1 }]);
+  const mixed = await reserve([{ tierId: "female", quantity: 1 }, { tierId: "group-8", quantity: 1 }]);
+  assert.equal(mixed.ok, false);
+  assert.match(mixed.error, /sold_out:group-8/);
+  assert.equal(Number((await one("select tier_held($1, 'female') as n", [EVENT])).n), 0);
+  assert.equal((await rows("select 1 from checkout_carts")).length, 1, "only the earlier paid cart exists");
+  assert.ok((await reserve([{ tierId: "female", quantity: 1 }])).ok, "Female alone still sells");
+});
+
+test("a cash sale respects the package cap and writes nothing when full", async () => {
+  await setCap(1);
+  assert.equal((await cash([{ tierId: "group-8", quantity: 1 }])).outcome, "created");
+  const over = await cash([{ tierId: "female", quantity: 1 }, { tierId: "group-8", quantity: 1 }]);
+  assert.equal(over.outcome, "oversold");
+  assert.equal((await rows("select 1 from orders")).length, 1);
+  assert.equal(await sold("female"), 0, "no partial cash order");
+});
+
+test("a full refund at the cap restores exactly one package and the next buyer can take it", async () => {
+  await setCap(1);
+  const out = await buy([{ tierId: "group-8", quantity: 1 }]);
+  assert.equal((await reserve([{ tierId: "group-8", quantity: 1 }])).ok, false);
+  assert.equal((await one("select cancel_order_by_payment_intent($1, true) as n", [out.pi])).n, 8);
+  assert.equal(await sold("group-8"), 0, "one package back, not eight");
+  assert.ok((await reserve([{ tierId: "group-8", quantity: 1 }])).ok);
+});
+
+test("payment that lands after the last package was taken is flagged oversold, not fulfilled", async () => {
+  await setCap(1);
+  const res = await reserve([{ tierId: "group-8", quantity: 1 }]);
+  const pi = nextPi();
+  await db.query("update checkout_carts set payment_intent_id = $1 where id = $2", [pi, res.cart_id]);
+  await db.query("update checkout_holds set expires_at = now() - interval '1 minute' where id = $1", [res.hold_id]);
+  await buy([{ tierId: "group-8", quantity: 1 }]);
+  const late = await one("select * from create_cart_order($1, $2, $3::uuid, $4, $5, $6, $7)", [pi, pi, res.cart_id, "Late", "late@example.com", res.snapshot.total, "usd"]);
+  assert.equal(late.outcome, "oversold");
+  assert.equal(await sold("group-8"), 1);
+});
+
+// ── The live cap: 3 packages, as production and the public data both say. ─────────
+
+test("production cap fixture: sold 2 + held 0 + request 1 is allowed; then sold 3 is refused everywhere", async () => {
+  assert.equal((await one("select capacity from tiers where tier_id = 'group-8'")).capacity, 3);
+  await buy([{ tierId: "group-8", quantity: 2 }]);
+  assert.equal(await sold("group-8"), 2);
+  const last = await buy([{ tierId: "group-8", quantity: 1 }]);
+  assert.equal(last.outcome, "created");
+  assert.equal(await sold("group-8"), 3);
+  assert.match((await reserve([{ tierId: "group-8", quantity: 1 }])).error, /sold_out:group-8/);
+  assert.match((await legacyHold(1)).error, /sold_out/);
+  assert.equal((await cash([{ tierId: "group-8", quantity: 1 }])).outcome, "oversold");
+  const mixed = await reserve([{ tierId: "general", quantity: 1 }, { tierId: "group-8", quantity: 1 }]);
+  assert.match(mixed.error, /sold_out:group-8/);
+  assert.equal(Number((await one("select tier_held($1, 'general') as n", [EVENT])).n), 0);
+});
+
+test("production cap fixture: sold 2 + held 1 leaves nothing for another buyer", async () => {
+  await buy([{ tierId: "group-8", quantity: 2 }]);
+  assert.ok((await legacyHold(1)).ok);
+  assert.match((await reserve([{ tierId: "group-8", quantity: 1 }])).error, /sold_out:group-8/);
+  assert.equal((await cash([{ tierId: "group-8", quantity: 1 }])).outcome, "oversold");
+  assert.equal((await legacyHold(1)).ok, false);
+});
+
+test("the 20-admission booking limit still applies under the 3-package cap", async () => {
+  assert.ok((await reserve([{ tierId: "group-8", quantity: 2 }])).ok, "16 admissions");
+  await db.exec("delete from checkout_holds; delete from checkout_carts;");
+  const three = await reserve([{ tierId: "group-8", quantity: 3 }]);
+  assert.equal(three.ok, false, "24 admissions in one booking is refused even though 3 packages remain");
+  assert.match(three.error, /too_many_admissions/);
+});
+
+test("public checkout: Group of 8 is on sale below the cap, unavailable while the last package is held, sold out at 3", () => {
+  const state = (sold, held) => applyAvailability(event, { "group-8": sold }, { "group-8": held }).ticketTiers.find((t) => t.id === "group-8");
+  assert.deepEqual([state(0, 0).soldOut, state(0, 0).unavailable], [false, false]);
+  assert.deepEqual([state(2, 0).soldOut, state(2, 0).unavailable], [false, false]);
+  assert.deepEqual([state(2, 1).soldOut, state(2, 1).unavailable], [false, true]);
+  assert.deepEqual([state(3, 0).soldOut, state(3, 0).unavailable], [true, true]);
+  const view = read("src/components/checkout/CheckoutView.tsx");
+  assert.match(view, /const closed = gone \|\| unavailable/);
+  assert.match(view, /gone \? "Sold out" : unavailable \? "Unavailable"/);
+  assert.match(view, /!t\.soldOut && !t\.unavailable/, "a closed tier is not buyable, so it has no stepper");
+  const other = applyAvailability(event, { female: 999, general: 999, couple: 999, group: 999 }, {}).ticketTiers;
+  assert.ok(other.filter((t) => ["female", "general", "couple", "group"].includes(t.id)).every((t) => !t.soldOut), "no new caps on other tiers");
+});
+
+test("the cap migration sets 3 packages on the existing row only, never admissions, and is idempotent", async () => {
+  const sql = read("supabase/migrations/20261110010000_cap_group_of_8.sql");
+  assert.match(sql, /set capacity = 3/);
+  assert.doesNotMatch(sql, /capacity = 24/);
+  assert.doesNotMatch(sql, /insert into|delete from|drop |alter table/i);
+  await setCap(null);
+  await db.exec(sql);
+  assert.equal((await one("select capacity from tiers where tier_id = 'group-8'")).capacity, 3);
+  await db.exec(sql);
+  assert.equal((await one("select capacity from tiers where tier_id = 'group-8'")).capacity, 3);
+  for (const tier of ["female", "general", "couple", "group"]) {
+    assert.equal((await one("select capacity from tiers where tier_id = $1", [tier])).capacity, null, `${tier} stays uncapped`);
+  }
 });
 
 test("the activation migration touches only the existing Group of 8 row, and only when it still matches", () => {

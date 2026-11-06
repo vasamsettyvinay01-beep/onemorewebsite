@@ -164,6 +164,8 @@ export const events: OneMoreEvent[] = [
         priceCents: 13999,
         currency: "USD",
         admits: 8,
+        // Temporary sales cap in packages (3 × 8 = 24 admissions), not a venue capacity.
+        capacity: 3,
       },
     ],
   },

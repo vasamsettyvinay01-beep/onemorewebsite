@@ -55,7 +55,7 @@ export async function seedTiers(db, { earlyBirdSold = false } = {}) {
       ('${EVENT}', 'general', 'Male', 1999, 'usd', 1, null, 10, true),
       ('${EVENT}', 'couple', 'Couple', 2999, 'usd', 2, null, 10, true),
       ('${EVENT}', 'group', 'Group of 5', 8999, 'usd', 5, null, 10, true),
-      ('${EVENT}', 'group-8', 'Group of 8', 13999, 'usd', 8, null, 10, true)
+      ('${EVENT}', 'group-8', 'Group of 8', 13999, 'usd', 8, 3, 10, true)
     on conflict do nothing;
     insert into promotions (id, code, event_id, discount_type, discount_value, eligible_tier_ids)
     values ('8b0f3f8e-0000-4000-8000-000000000001', 'GISO15', '${EVENT}', 'percentage', 15, array['female', 'general'])
