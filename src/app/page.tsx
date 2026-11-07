@@ -1,9 +1,8 @@
-import { OneMoreCanvas } from "@/components/canvas/OneMoreCanvas";
+import type { Metadata } from "next";
+import { HomeStage } from "@/components/canvas/HomeStage";
 import { Arrival } from "@/components/canvas/movements/Arrival";
 import { Closing } from "@/components/canvas/movements/Closing";
-import { Experience } from "@/components/canvas/movements/Experience";
 import { Gathering } from "@/components/canvas/movements/Gathering";
-import { LaunchSeries } from "@/components/canvas/movements/LaunchSeries";
 import { Manifesto } from "@/components/canvas/movements/Manifesto";
 import { CommunityProvider } from "@/components/community/CommunityProvider";
 import { FloatingCommunityPill } from "@/components/community/FloatingCommunityPill";
@@ -12,32 +11,34 @@ import { Intro } from "@/components/intro/Intro";
 import { IntroProvider } from "@/components/intro/IntroProvider";
 import { Header } from "@/components/layout/Header";
 import { PointerLight } from "@/components/motion/PointerLight";
-import { FloatingTicketTab } from "@/components/ticketing/FloatingTicketTab";
 import { TicketSheetProvider } from "@/components/ticketing/TicketSheetProvider";
+import { events } from "@/data/events";
+import { brand } from "@/data/brand";
 import { anchors } from "@/data/navigation";
-import { eventEndsAt } from "@/lib/event-end";
-import { formatChapter, getFeaturedEvent } from "@/lib/events";
+import { primaryEventAt } from "@/lib/event-end";
+import { leadMetadata } from "@/lib/lead-metadata";
+
+/** The prerender's clock. Later transitions happen in the browser; a rebuild only refreshes this. */
+const builtAt = Date.now();
+const lead = leadMetadata(primaryEventAt(events, new Date(builtAt)));
+
+export const metadata: Metadata = lead
+  ? {
+      title: { absolute: lead.title },
+      description: lead.description,
+      openGraph: { title: lead.title, description: lead.description, type: "website", siteName: brand.name },
+      twitter: { card: "summary_large_image", title: lead.title, description: lead.description },
+    }
+  : {};
 
 /**
  * The One More Company — one continuous cinematic canvas.
  *
- * Arrival → the manifesto → the featured experience takes over the world →
+ * Arrival → the manifesto → the lead experience takes over the world →
  * the launch series → the gathering → the ending.
  * Components exist for maintainability; visually there are no sections.
  */
 export default function HomePage() {
-  const featured = getFeaturedEvent();
-  const campaign = featured?.theme ?? null;
-  const featuredSlot = featured
-    ? {
-        name: featured.name,
-        label: featured.eyebrow ?? "Next up",
-        chapterLabel: featured.chapter !== undefined ? formatChapter(featured.chapter) : undefined,
-        endsAt: eventEndsAt(featured)?.toISOString(),
-        artwork: featured.artwork,
-      }
-    : null;
-
   return (
     <IntroProvider>
       <CommunityProvider>
@@ -53,18 +54,22 @@ export default function HomePage() {
           <HousePartyAnnouncement />
           <PointerLight />
 
-          <OneMoreCanvas campaign={campaign}>
-            <main>
-              <Arrival />
-              <Manifesto />
-              <Experience />
-              <LaunchSeries featured={featuredSlot} />
-              <Gathering />
-              <Closing />
-            </main>
-          </OneMoreCanvas>
+          <HomeStage
+            builtAt={builtAt}
+            opening={
+              <>
+                <Arrival />
+                <Manifesto />
+              </>
+            }
+            closing={
+              <>
+                <Gathering />
+                <Closing />
+              </>
+            }
+          />
 
-          {featured && <FloatingTicketTab event={featured} />}
           <FloatingCommunityPill />
         </TicketSheetProvider>
       </CommunityProvider>

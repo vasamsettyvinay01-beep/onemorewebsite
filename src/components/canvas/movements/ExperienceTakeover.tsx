@@ -7,11 +7,13 @@ import { brand } from "@/data/brand";
 import { anchors } from "@/data/navigation";
 import { formatChapter } from "@/lib/events";
 import { ease } from "@/lib/motion";
-import { useNightOver } from "@/lib/use-night-over";
+import { useSalesPhase } from "@/lib/use-lifecycle";
 import { ArtworkFrame } from "@/components/ui/ArtworkFrame";
 import { Button } from "@/components/ui/Button";
 import { Reveal } from "@/components/motion/Reveal";
 import { EventFacts } from "@/components/events/EventFacts";
+import { MidnightArtwork } from "@/components/events/MidnightArtwork";
+import { SalesClosedNotice } from "@/components/ticketing/SalesClosedNotice";
 import { useTicketSheet } from "@/components/ticketing/TicketSheetProvider";
 import { useCanvas } from "../CanvasProvider";
 
@@ -32,8 +34,10 @@ export function ExperienceTakeover({ event }: Props) {
   const reduce = useReducedMotion();
   const { takeover } = useCanvas();
   const { openFor } = useTicketSheet();
-  const over = useNightOver(event);
-  const selling = over === false;
+  const phase = useSalesPhase(event);
+  const over = phase === "ended";
+  const comingSoon = event.status === "coming-soon" || event.status === "draft";
+  const selling = phase === "open" && !comingSoon;
 
   const { scrollYProgress } = useScroll({ target: ref, offset: ["start end", "end start"] });
   const strength = useTransform(scrollYProgress, [0.06, 0.28, 0.62, 0.82], [0, 1, 1, 0]);
@@ -64,23 +68,30 @@ export function ExperienceTakeover({ event }: Props) {
           className="w-full sm:order-2 sm:max-w-[min(100%,76svh)] sm:justify-self-end"
           style={{ y: artY, scale: artScale }}
         >
-          <ArtworkFrame
-            artwork={artwork}
-            sizes="(max-width: 640px) 100vw, 50vw"
-            tone={[event.theme.primary, event.theme.secondary]}
-            className="aspect-square w-full shadow-[0_40px_80px_-40px_rgba(0,0,0,0.95)]"
-          >
-            <div
-              aria-hidden
-              className="absolute inset-0"
-              style={{
-                background:
-                  "linear-gradient(180deg, transparent 55%, color-mix(in srgb, var(--ev-primary) 80%, black) 100%)",
-                opacity: "var(--ev-overlay)",
-              }}
-            />
-            <div aria-hidden className="absolute inset-0 ring-1 ring-inset ring-white/10" />
-          </ArtworkFrame>
+          {!artwork.src && event.theme.motif === "midnight" ? (
+            <div className="relative aspect-square w-full shadow-[0_40px_80px_-40px_rgba(0,0,0,0.95)]">
+              <MidnightArtwork artwork={artwork} fill />
+              <div aria-hidden className="pointer-events-none absolute inset-0 ring-1 ring-inset ring-[#C6A15B]/20" />
+            </div>
+          ) : (
+            <ArtworkFrame
+              artwork={artwork}
+              sizes="(max-width: 640px) 100vw, 50vw"
+              tone={[event.theme.primary, event.theme.secondary]}
+              className="aspect-square w-full shadow-[0_40px_80px_-40px_rgba(0,0,0,0.95)]"
+            >
+              <div
+                aria-hidden
+                className="absolute inset-0"
+                style={{
+                  background:
+                    "linear-gradient(180deg, transparent 55%, color-mix(in srgb, var(--ev-primary) 80%, black) 100%)",
+                  opacity: "var(--ev-overlay)",
+                }}
+              />
+              <div aria-hidden className="absolute inset-0 ring-1 ring-inset ring-white/10" />
+            </ArtworkFrame>
+          )}
         </motion.div>
 
         {/* name + essentials */}
@@ -102,7 +113,9 @@ export function ExperienceTakeover({ event }: Props) {
 
           {event.shortDescription && (
             <Reveal delay={0.1} className="mt-6 max-w-[38ch]">
-              <p className="text-[0.95rem] leading-[1.6] text-(--ev-text-muted)">{event.shortDescription}</p>
+              <p className="font-display text-[clamp(1.35rem,3.4vw,1.9rem)] italic leading-[1.15] text-(--ev-text-muted)">
+                {event.shortDescription}
+              </p>
             </Reveal>
           )}
 
@@ -120,6 +133,24 @@ export function ExperienceTakeover({ event }: Props) {
                   {event.status === "sold-out" ? "Join the list for releases" : "Community gets first access"}
                 </span>
               )}
+            </Reveal>
+          )}
+
+          {phase === "closed" && !comingSoon && (
+            <Reveal delay={0.25} className="mt-9 border-t border-white/12 pt-6 sm:mt-11">
+              <SalesClosedNotice event={event} />
+            </Reveal>
+          )}
+
+          {comingSoon && !over && (
+            <Reveal delay={0.25} className="mt-9 sm:mt-11">
+              <p className="eyebrow flex items-center gap-3 text-[0.62rem] tracking-[0.32em] text-(--ev-accent)">
+                <span aria-hidden className="relative flex size-1.5">
+                  <span className="absolute inline-flex size-full animate-ping rounded-full bg-(--ev-accent) opacity-50 [animation-duration:2.4s]" />
+                  <span className="relative inline-flex size-1.5 rounded-full bg-(--ev-accent)" />
+                </span>
+                {brand.copy.comingSoon}
+              </p>
             </Reveal>
           )}
         </div>

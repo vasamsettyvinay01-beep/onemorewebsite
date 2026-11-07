@@ -119,7 +119,9 @@ export const events: OneMoreEvent[] = [
         height: 232,
       },
     ],
-    // saleStart, saleEnd: not finalised yet.
+    // Public checkout closes one hour before the night ends. The checkout
+    // function enforces the same instant from supabase/functions/_shared/sales-window.mjs.
+    saleEnd: "2026-11-08T01:00",
     // Selling: run `npm run stripe:setup` after any tier change (it syncs prices to the backend),
     // then set status: "on-sale".
     ticketTiers: [
@@ -168,5 +170,42 @@ export const events: OneMoreEvent[] = [
         capacity: 3,
       },
     ],
+  },
+  {
+    id: "evt_new_year_night",
+    slug: "new-year-night",
+    name: "New Year Night",
+    status: "coming-soon",
+    // Diwali stays `featured` so the door app keeps scanning it. The homepage
+    // leads with whichever public night is next by time, not by this flag.
+    featured: false,
+    chapter: 2,
+    eyebrow: "NEXT UP",
+    shortDescription: "One more night. One more year.",
+    artwork: {
+      alt: "New Year Night by The One More Company: fine gold rings of light turning around the One More seal at midnight",
+    },
+    theme: {
+      primary: "#0F0F10", // rich black
+      secondary: "#1A2030", // the faintest midnight
+      accent: "#C6A15B", // warm gold
+      text: "#F6F1E8", // soft ivory
+      textMuted: "rgba(246, 241, 232, 0.64)",
+      overlayStrength: 0.35,
+      mood: "cinematic",
+      lighting: "warm",
+      lights: ["#C6A15B", "#E8D6AC", "#F6F1E8", "#1A2030"],
+      motif: "midnight",
+    },
+    date: "2027-01-01",
+    startTime: "21:00",
+    endTime: "02:00",
+    minimumAge: 21,
+    timezone: "America/Chicago",
+    // No venue until it is announced. This file ships in the public bundle,
+    // so a venue written here is public the moment it deploys.
+    city: "Houston",
+    // No tiers, no Stripe products and no checkout until pricing is decided.
+    ticketTiers: [],
   },
 ];

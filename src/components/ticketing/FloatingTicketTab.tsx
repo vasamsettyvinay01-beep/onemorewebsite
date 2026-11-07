@@ -2,9 +2,9 @@
 
 import { AnimatePresence, motion } from "motion/react";
 import type { OneMoreEvent } from "@/types/event";
-import { formatEventDate } from "@/lib/events";
+import { formatEventDate, formatEventTime } from "@/lib/events";
 import { ease } from "@/lib/motion";
-import { useNightOver } from "@/lib/use-night-over";
+import { useSalesPhase } from "@/lib/use-lifecycle";
 import { useCommunity } from "@/components/community/CommunityProvider";
 import { useIntro } from "@/components/intro/IntroProvider";
 import { useTicketSheet } from "./TicketSheetProvider";
@@ -21,20 +21,25 @@ export function FloatingTicketTab({ event }: FloatingTicketTabProps) {
   const { ready } = useIntro();
   const { open: communityOpen } = useCommunity();
   const { open: ticketOpen, openFor } = useTicketSheet();
-  const over = useNightOver(event);
+  const phase = useSalesPhase(event);
   const date = formatEventDate(event);
   const city = event.city ?? event.venue?.city;
   const available = event.status !== "cancelled" && event.status !== "past";
   const onSale = event.status === "on-sale";
   const soldOut = event.status === "sold-out";
-  const action = soldOut ? "View status" : onSale ? "Get tickets" : "Get access";
+  const comingSoon = event.status === "coming-soon";
+  const action = soldOut ? "View status" : onSale ? "Get tickets" : comingSoon ? "Coming soon" : "Get access";
   const urgency = soldOut
     ? "This one went fast."
     : onSale
       ? "Before they're sold out."
-      : "Before the list closes.";
-  const badge = soldOut ? "Closed" : onSale ? "ASAP" : "Soon";
-  const show = ready && over === false && available && !communityOpen && !ticketOpen;
+      : comingSoon && event.shortDescription
+        ? event.shortDescription
+        : "Before the list closes.";
+  const badge = soldOut ? "Closed" : onSale ? "ASAP" : comingSoon ? "Next" : "Soon";
+  const time = comingSoon ? formatEventTime(event) : undefined;
+  const age = comingSoon && event.minimumAge ? `${event.minimumAge}+` : undefined;
+  const show = ready && phase === "open" && available && !communityOpen && !ticketOpen;
 
   return (
     <AnimatePresence>
@@ -83,7 +88,7 @@ export function FloatingTicketTab({ event }: FloatingTicketTabProps) {
 
               {(date || city) && (
                 <span className="mt-3 block text-[0.68rem] font-semibold uppercase tracking-[0.2em] text-ivory/55 lg:mt-4">
-                  {[date, city].filter(Boolean).join("  ·  ")}
+                  {[date, time, city, age].filter(Boolean).join("  ·  ")}
                 </span>
               )}
 

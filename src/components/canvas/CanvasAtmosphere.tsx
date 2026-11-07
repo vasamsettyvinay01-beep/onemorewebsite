@@ -74,6 +74,7 @@ export function CanvasAtmosphere() {
 
   const campaignScale = useTransform(takeover, [0, 1], [1.03, 1]);
   const festive = campaign?.mood === "festive";
+  const midnight = campaign?.motif === "midnight";
 
   return (
     <div aria-hidden className="pointer-events-none fixed inset-0 z-0 overflow-hidden bg-rich">
@@ -139,6 +140,15 @@ export function CanvasAtmosphere() {
               style={{
                 background:
                   "radial-gradient(1px 1px at 12% 18%, rgba(255,240,220,0.8), transparent 100%), radial-gradient(1px 1px at 84% 12%, rgba(255,240,220,0.7), transparent 100%), radial-gradient(1px 1px at 64% 42%, rgba(255,240,220,0.55), transparent 100%), radial-gradient(1px 1px at 30% 62%, rgba(255,240,220,0.7), transparent 100%), radial-gradient(1px 1px at 90% 78%, rgba(255,240,220,0.6), transparent 100%)",
+              }}
+            />
+          )}
+          {midnight && (
+            <div
+              className="absolute inset-0 animate-twinkle [animation-duration:9s]"
+              style={{
+                background:
+                  "radial-gradient(1px 1px at 18% 22%, rgba(232,214,172,0.7), transparent 100%), radial-gradient(1px 1px at 72% 16%, rgba(246,241,232,0.55), transparent 100%), radial-gradient(1.5px 1.5px at 58% 48%, rgba(198,161,91,0.6), transparent 100%), radial-gradient(1px 1px at 26% 70%, rgba(232,214,172,0.5), transparent 100%), radial-gradient(1px 1px at 86% 82%, rgba(198,161,91,0.55), transparent 100%), radial-gradient(45% 35% at 70% 40%, rgba(198,161,91,0.07), transparent 100%)",
               }}
             />
           )}

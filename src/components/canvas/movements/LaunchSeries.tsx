@@ -3,25 +3,29 @@
 import { motion, useInView, useReducedMotion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 import { campaignPieces } from "@/data/campaign";
-import { useInstantPassed } from "@/lib/use-night-over";
 import { anchors } from "@/data/navigation";
 import { cn } from "@/lib/cn";
 import { ease } from "@/lib/motion";
-import type { Artwork } from "@/types/event";
+import type { Artwork, EventTheme } from "@/types/event";
 import { ArtworkFrame } from "@/components/ui/ArtworkFrame";
 import { SectionMark } from "@/components/ui/SectionMark";
+import { MidnightArtwork } from "@/components/events/MidnightArtwork";
 import { Reveal } from "@/components/motion/Reveal";
 
 const GLIMPSE_MS = 3200;
+/** Slots on one desktop row. Veiled pieces fill whatever the announced events leave. */
+const ROW = 4;
 
-export interface FeaturedSlot {
+export interface SeriesSlot {
+  id: string;
   name: string;
   label: string;
-  /** Shown in place of `label` once `endsAt` has passed. */
-  chapterLabel?: string;
-  /** ISO instant when this night is over. */
-  endsAt?: string;
   artwork: Artwork;
+  motif?: EventTheme["motif"];
+  /** Short facts printed on the card itself, for events shown without a photograph. */
+  facts?: string[];
+  /** The event the page is currently leading with; its card links to it. */
+  lead: boolean;
 }
 
 const itemClass = "w-[72vw] max-w-[20rem] shrink-0 snap-start lg:w-auto lg:max-w-none";
@@ -29,21 +33,20 @@ const frameClass = "relative aspect-[4/5] w-full overflow-hidden bg-rich";
 const captionClass = "mt-4 flex items-baseline justify-between gap-4 border-t border-ivory/10 pt-3";
 
 /**
- * What's next. The featured event holds the first slot, clearly shown; the
- * slots after it stay veiled — blurred and untitled — while a slow glimpse
- * travels between them. Unveiling a slot is a data change (`revealed: true`).
+ * What's next. Announced events hold the first slots in date order, clearly
+ * shown; the slots after them stay veiled — blurred and untitled — while a slow
+ * glimpse travels between them. Unveiling a slot is a data change (`revealed: true`).
  */
-export function LaunchSeries({ featured }: { featured: FeaturedSlot | null }) {
+export function LaunchSeries({ series }: { series: SeriesSlot[] }) {
   const ref = useRef<HTMLElement>(null);
   const inView = useInView(ref, { amount: 0.3 });
   const reduce = useReducedMotion();
-  const veiled = campaignPieces.map((p, i) => (p.revealed ? -1 : i)).filter((i) => i >= 0);
+  const pieces = campaignPieces.slice(0, Math.max(0, ROW - series.length));
+  const veiled = pieces.map((p, i) => (p.revealed ? -1 : i)).filter((i) => i >= 0);
   const [glimpse, setGlimpse] = useState(0);
-  const passed = useInstantPassed(featured?.endsAt);
-  const label = passed && featured?.chapterLabel ? featured.chapterLabel : (featured?.label ?? "");
   const nextReveal = veiled[0];
-  const glimpsed = veiled[glimpse];
-  const offset = featured ? 2 : 1;
+  const glimpsed = veiled[glimpse % Math.max(veiled.length, 1)];
+  const offset = series.length + 1;
 
   useEffect(() => {
     if (!inView || reduce || veiled.length < 2) return;
@@ -73,37 +76,61 @@ export function LaunchSeries({ featured }: { featured: FeaturedSlot | null }) {
       </div>
 
       <ul className="no-scrollbar mt-12 flex snap-x snap-mandatory scroll-px-6 gap-4 overflow-x-auto px-6 pb-2 sm:mt-16 sm:scroll-px-12 sm:px-12 lg:mx-auto lg:grid lg:max-w-[90rem] lg:grid-cols-4 lg:gap-6 lg:overflow-visible lg:px-16">
-        {featured && (
-          <Reveal as="li" className={itemClass}>
-            <a href={`#${anchors.experience}`} className="group block">
-              <figure className="m-0">
-                <div className={frameClass}>
+        {series.map((slot, i) => {
+          const figure = (
+            <figure className="m-0">
+              <div className={frameClass}>
+                {!slot.artwork.src && slot.motif === "midnight" ? (
+                  <MidnightArtwork artwork={slot.artwork} className="size-full" />
+                ) : (
                   <ArtworkFrame
-                    artwork={featured.artwork}
+                    artwork={slot.artwork}
                     sizes="(max-width: 1024px) 72vw, 22vw"
                     className="size-full transition-transform duration-[1.4s] ease-(--ease-cinematic) group-hover:scale-[1.03]"
                   />
-                  <div aria-hidden className="pointer-events-none absolute inset-0 ring-1 ring-inset ring-gold/25" />
-                </div>
-                <figcaption className={captionClass}>
-                  <span className="text-[0.8rem] font-semibold tracking-[-0.01em] text-ivory/90">
-                    <span className="mr-2 text-gold">01</span>
-                    {featured.name}
-                  </span>
-                  <span className="eyebrow text-[0.55rem] text-gold">{label}</span>
-                </figcaption>
-              </figure>
-            </a>
-          </Reveal>
-        )}
+                )}
+                {slot.facts && slot.facts.length > 0 && (
+                  <div className="absolute inset-x-0 bottom-0 bg-linear-to-t from-[#0F0F10]/95 via-[#0F0F10]/70 to-transparent px-5 pb-5 pt-14">
+                    <ul className="space-y-1.5">
+                      {slot.facts.map((fact) => (
+                        <li key={fact} className="text-[0.62rem] font-semibold uppercase tracking-[0.24em] text-[#F6F1E8]/70">
+                          {fact}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                <div aria-hidden className="pointer-events-none absolute inset-0 ring-1 ring-inset ring-gold/25" />
+              </div>
+              <figcaption className={captionClass}>
+                <span className="text-[0.8rem] font-semibold tracking-[-0.01em] text-ivory/90">
+                  <span className="mr-2 text-gold">{String(i + 1).padStart(2, "0")}</span>
+                  {slot.name}
+                </span>
+                <span className="eyebrow shrink-0 text-[0.55rem] text-gold">{slot.label}</span>
+              </figcaption>
+            </figure>
+          );
+          return (
+            <Reveal as="li" key={slot.id} delay={0.08 * i} className={itemClass}>
+              {slot.lead ? (
+                <a href={`#${anchors.experience}`} className="group block">
+                  {figure}
+                </a>
+              ) : (
+                figure
+              )}
+            </Reveal>
+          );
+        })}
 
-        {campaignPieces.map((piece, i) => {
+        {pieces.map((piece, i) => {
           const number = String(i + offset).padStart(2, "0");
           const isGlimpsed = !piece.revealed && i === glimpsed;
           const status = piece.revealed ? piece.kind : i === nextReveal ? "Revealing next" : "Coming soon";
 
           return (
-            <Reveal as="li" key={piece.id} delay={0.08 * (i + 1)} className={itemClass}>
+            <Reveal as="li" key={piece.id} delay={0.08 * (i + series.length)} className={itemClass}>
               <figure className="m-0">
                 <div className={frameClass}>
                   {piece.revealed ? (

@@ -77,7 +77,15 @@ public/
 2. Put campaign artwork in `public/events/<slug>/` and set `artwork.src`.
 3. Define `theme` — the section, lights, CTA and ticket sheet all recolour from it.
 4. Fill only the details that are confirmed; anything undefined shows **COMING SOON**.
-5. Set `featured: true` (and `false` on the previous event).
+5. Set `featured: true` (and `false` on the previous event) when it starts selling. That flag drives the
+   door app and `stripe:setup`; the homepage does not use it.
+
+The homepage leads with the earliest public night that has not ended, judged on the web server's
+clock in each event's timezone, so it moves to the next event by itself when a night ends. `saleEnd`
+closes public checkout earlier than the end of the night; mirror it in
+`supabase/functions/_shared/sales-window.mjs`, which the `checkout` function enforces
+(`scripts/lifecycle.test.mjs` keeps the two equal). In `npm run dev` only, `?lifecycle-now=<ISO time>`
+previews another moment. `npm run test:cutoff` runs the real checkout handler against simulated clocks.
 
 Status values: `draft` · `coming-soon` · `on-sale` · `sold-out` · `past` · `cancelled`.
 

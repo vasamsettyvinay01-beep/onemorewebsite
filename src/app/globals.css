@@ -107,6 +107,20 @@
   }
 }
 
+@keyframes midnight-ripple {
+  0% {
+    transform: scale(0.7);
+    opacity: 0;
+  }
+  18% {
+    opacity: 0.55;
+  }
+  100% {
+    transform: scale(2.6);
+    opacity: 0;
+  }
+}
+
 /* Short viewports (small phones, landscape, low laptops) */
 @custom-variant short (@media (max-height: 44rem));
 @custom-variant compact (@media (max-height: 50rem));

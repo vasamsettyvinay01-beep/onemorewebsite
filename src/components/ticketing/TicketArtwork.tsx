@@ -5,6 +5,7 @@ import { motion } from "motion/react";
 import type { OneMoreEvent } from "@/types/event";
 import { ease } from "@/lib/motion";
 import { BrandLogo } from "@/components/ui/BrandLogo";
+import { MidnightArtwork } from "@/components/events/MidnightArtwork";
 
 /**
  * The image half of the ticket sheet. Mobile uses a wide cut of the room.
@@ -43,6 +44,8 @@ export function TicketArtwork({ event }: { event: OneMoreEvent }) {
             style={{ objectPosition: art.focal ?? "50% 50%" }}
           />
         </motion.div>
+      ) : event.theme.motif === "midnight" ? (
+        <MidnightArtwork artwork={art} seal={false} fill />
       ) : (
         <div
           className="absolute inset-0"

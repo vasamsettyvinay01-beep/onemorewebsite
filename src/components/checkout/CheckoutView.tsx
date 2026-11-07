@@ -29,8 +29,10 @@ import {
   type QuoteLine,
 } from "@/lib/cart";
 import { formatChapter, formatEventTime, getEventBySlug, getVisibleTiers, isOnSale, waitingFor } from "@/lib/events";
-import { useNightOver } from "@/lib/use-night-over";
+import type { SalesPhase } from "@/lib/event-end";
+import { useSalesPhase } from "@/lib/use-lifecycle";
 import { cn } from "@/lib/cn";
+import { SalesClosedNotice } from "@/components/ticketing/SalesClosedNotice";
 import type { OneMoreEvent, TicketTier } from "@/types/event";
 
 const stripePromise = backend.stripeKey ? loadStripe(backend.stripeKey) : null;
@@ -152,8 +154,10 @@ export function CheckoutView() {
   const params = useSearchParams();
   const staticEvent = getEventBySlug(params.get("event") ?? "") ?? null;
   const event = useLiveEvent(staticEvent, true);
-  const over = useNightOver(event);
-  const open = !!event && backendConfigured && !!stripePromise && isOnSale(event) && over !== true;
+  const phase = useSalesPhase(event);
+  // A payment already confirming when sales close finishes here; only new attempts are refused.
+  const [paying, setPaying] = useState(false);
+  const open = !!event && backendConfigured && !!stripePromise && isOnSale(event) && (phase === "open" || (paying && phase !== null));
 
   const date = event ? longDate(event) : undefined;
   const when = [date?.replace(/, \d{4}$/, ""), event ? formatEventTime(event) : undefined].filter(Boolean).join(" · ");
@@ -191,11 +195,11 @@ export function CheckoutView() {
           {event && open ? (
             <div className="mt-5 flex min-h-0 flex-col">
               <Elements stripe={stripePromise} options={elementsOptions(1)}>
-                <CheckoutCard event={event} initialTier={params.get("tier")} />
+                <CheckoutCard event={event} initialTier={params.get("tier")} onPayingChange={setPaying} />
               </Elements>
             </div>
           ) : (
-            <Closed event={event} ended={over === true} />
+            <Closed event={event} phase={phase} />
           )}
         </div>
       </div>
@@ -214,7 +218,15 @@ function elementsOptions(amount: number): StripeElementsOptions {
   };
 }
 
-function CheckoutCard({ event, initialTier }: { event: OneMoreEvent; initialTier: string | null }) {
+function CheckoutCard({
+  event,
+  initialTier,
+  onPayingChange,
+}: {
+  event: OneMoreEvent;
+  initialTier: string | null;
+  onPayingChange: (paying: boolean) => void;
+}) {
   const router = useRouter();
   const stripe = useStripe();
   const elements = useElements();
@@ -443,6 +455,7 @@ function CheckoutCard({ event, initialTier }: { event: OneMoreEvent; initialTier
     }
     phase.current = "paying";
     setBusy(true);
+    onPayingChange(true);
     setError(null);
     const holdKey = paymentKey(email);
     try {
@@ -455,6 +468,7 @@ function CheckoutCard({ event, initialTier }: { event: OneMoreEvent; initialTier
       phase.current = "idle";
       setError((err as Error).message);
       setBusy(false);
+      onPayingChange(false);
     }
   }
 
@@ -493,6 +507,7 @@ function CheckoutCard({ event, initialTier }: { event: OneMoreEvent; initialTier
     }
     phase.current = "paying";
     setBusy(true);
+    onPayingChange(true);
     const buyerEmail = e.billingDetails?.email?.trim() || email.trim();
     const holdKey = paymentKey(buyerEmail);
     try {
@@ -509,6 +524,7 @@ function CheckoutCard({ event, initialTier }: { event: OneMoreEvent; initialTier
       e.paymentFailed({ reason: "fail" });
       setError((err as Error).message);
       setBusy(false);
+      onPayingChange(false);
     }
   }
 
@@ -859,7 +875,21 @@ function SoldOutCard() {
   );
 }
 
-function Closed({ event, ended }: { event: OneMoreEvent | null; ended: boolean }) {
+function Closed({ event, phase }: { event: OneMoreEvent | null; phase: SalesPhase | null }) {
+  const ended = phase === "ended";
+  if (event && phase === "closed") {
+    return (
+      <div className="flex flex-1 flex-col items-center justify-center pb-24 text-center">
+        <SalesClosedNotice event={event} align="center" className="flex flex-col" />
+        <Link
+          href="/"
+          className="mt-10 border border-gold/70 px-8 py-3.5 text-[0.6rem] font-semibold uppercase tracking-[0.3em] text-gold transition-colors hover:bg-gold hover:text-rich"
+        >
+          Return home
+        </Link>
+      </div>
+    );
+  }
   return (
     <div className="flex flex-1 flex-col items-center justify-center pb-24 text-center">
       <p className="font-display text-[clamp(2.2rem,8vw,3.2rem)] leading-none text-ivory">

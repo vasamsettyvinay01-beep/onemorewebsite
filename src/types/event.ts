@@ -44,6 +44,8 @@ export interface EventTheme {
   lighting: EventLighting;
   /** Extra colours for ambient light bursts (sparks, bokeh). */
   lights?: string[];
+  /** Code-drawn key art used when the campaign has no photograph. */
+  motif?: "midnight";
 }
 
 /**
@@ -140,5 +142,9 @@ export interface OneMoreEvent {
   ticketTiers: TicketTier[];
   capacity?: number;
   saleStart?: string;
+  /**
+   * Public checkout closes at this wall-clock time ("YYYY-MM-DDTHH:MM") in the
+   * event's timezone. Undefined = sales run until the night ends.
+   */
   saleEnd?: string;
 }

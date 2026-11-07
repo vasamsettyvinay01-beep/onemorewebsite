@@ -38,6 +38,7 @@ import {
   promotionAppliesToTier,
   promotionIsLive,
 } from "../_shared/promo.mjs";
+import { SALES_CLOSED_MESSAGE, salesWindowClosed } from "../_shared/sales-window.mjs";
 
 interface LivePromotion {
   id: string;
@@ -88,6 +89,7 @@ async function handle(req: Request): Promise<Response> {
   const quote = body.quote === true;
   const promoCode = normalizePromoCode(body.promoCode);
   if (!ID_RE.test(eventId) || !ID_RE.test(tierId)) return json(req, { error: "This pass isn't available." }, 404);
+  if (salesWindowClosed(eventId)) return json(req, { error: SALES_CLOSED_MESSAGE, code: "sales_closed" }, 409);
   const closed = await salesClosed(eventId);
   if (closed) return json(req, { error: closed }, 409);
   if (!Number.isInteger(quantity) || quantity < 1 || quantity > 20) return json(req, { error: "Choose how many passes." }, 400);
@@ -432,6 +434,7 @@ async function handleCart(req: Request, body: Record<string, unknown>): Promise<
   const quote = body.quote === true;
   const promoCode = normalizePromoCode(body.promoCode);
   if (!ID_RE.test(eventId)) return json(req, { error: "This pass isn't available." }, 404);
+  if (salesWindowClosed(eventId)) return json(req, { error: SALES_CLOSED_MESSAGE, code: "sales_closed" }, 409);
 
   const parsed = parseCartItems(body.items);
   if ("error" in parsed) {
