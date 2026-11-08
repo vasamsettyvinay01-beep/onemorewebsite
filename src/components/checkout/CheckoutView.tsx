@@ -877,6 +877,7 @@ function SoldOutCard() {
 
 function Closed({ event, phase }: { event: OneMoreEvent | null; phase: SalesPhase | null }) {
   const ended = phase === "ended";
+  if (event?.status === "sold-out") return <SoldOutCard />;
   if (event && phase === "closed") {
     return (
       <div className="flex flex-1 flex-col items-center justify-center pb-24 text-center">

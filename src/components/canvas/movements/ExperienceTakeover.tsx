@@ -7,6 +7,7 @@ import { brand } from "@/data/brand";
 import { anchors } from "@/data/navigation";
 import { formatChapter } from "@/lib/events";
 import { ease } from "@/lib/motion";
+import { useLiveEvent } from "@/lib/availability";
 import { useSalesPhase } from "@/lib/use-lifecycle";
 import { ArtworkFrame } from "@/components/ui/ArtworkFrame";
 import { Button } from "@/components/ui/Button";
@@ -29,7 +30,8 @@ interface Props {
  * artwork, name and essentials appear inside that recoloured world — there is
  * no section box.
  */
-export function ExperienceTakeover({ event }: Props) {
+export function ExperienceTakeover({ event: staticEvent }: Props) {
+  const event = useLiveEvent(staticEvent, true) ?? staticEvent;
   const ref = useRef<HTMLDivElement>(null);
   const reduce = useReducedMotion();
   const { takeover } = useCanvas();

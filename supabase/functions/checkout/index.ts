@@ -137,6 +137,9 @@ async function handle(req: Request): Promise<Response> {
     if (quantity > remaining) return json(req, { error: `Only ${remaining} ${tier.name} left.`, remaining }, 409);
   }
 
+  const admissions = quantity * Math.max(Number(tier.admits) || 1, 1);
+  if (await overOnlineCap(eventId, admissions)) return json(req, { error: SOLD_OUT, code: "sold_out", remaining: 0 }, 409);
+
   const prices = await stripe.prices.list({ lookup_keys: [`${eventId}:${tierId}`], active: true, limit: 1 });
   const price = prices.data[0];
   if (price && (price.unit_amount !== tier.price_cents || price.currency !== tier.currency)) {
@@ -339,6 +342,7 @@ async function release(req: Request, body: Record<string, unknown>): Promise<Res
 }
 
 function reserveError(req: Request, message: string, tierName: string): Response {
+  if (message.includes("sold_out:online")) return json(req, { error: SOLD_OUT, code: "sold_out", remaining: 0 }, 409);
   if (message.includes("sold_out")) return json(req, { error: `${tierName} is sold out.`, remaining: 0 }, 409);
   if (message.includes("too_many")) return json(req, { error: "Choose fewer passes." }, 400);
   if (message.includes("unavailable")) return json(req, { error: "This pass isn't available." }, 404);
@@ -347,6 +351,20 @@ function reserveError(req: Request, message: string, tierName: string): Response
   }
   console.error(JSON.stringify({ msg: "reserve_failed", error: message.slice(0, 200) }));
   return json(req, { error: "Something went wrong. Please try again." }, 500);
+}
+
+const SOLD_OUT = "Sold out.";
+
+/** True when this purchase would take online admissions past the event cap. No cap means no. */
+async function overOnlineCap(eventId: string, admissions: number): Promise<boolean> {
+  const { data, error } = await admin.rpc("online_sale_room", { p_event_id: eventId });
+  if (error) {
+    if (/online_sale_room|schema cache|does not exist/i.test(error.message)) return false;
+    throw error;
+  }
+  const room = typeof data === "string" ? JSON.parse(data) : data;
+  if (room?.cap == null) return false;
+  return Number(room.committed ?? 0) + admissions > Number(room.cap);
 }
 
 async function countSold(eventId: string, tierId: string): Promise<number> {
@@ -486,6 +504,7 @@ async function handleCart(req: Request, body: Record<string, unknown>): Promise<
     admissions += quantity * Math.max(tier.admits, 1);
   }
   if (admissions > MAX_CART_ADMISSIONS) return json(req, { error: CART_ERRORS.too_many_admissions, code: "too_many_admissions" }, 400);
+  if (await overOnlineCap(eventId, admissions)) return json(req, { error: SOLD_OUT, code: "sold_out", remaining: 0 }, 409);
 
   for (let i = 0; i < items.length; i += 1) {
     const tier = ordered[i];
@@ -732,6 +751,7 @@ function cartReserveError(req: Request, message: string, tiers: Map<string, Cart
     const id = message.split(`${prefix}:`)[1]?.split(/\s/)[0] ?? "";
     return { id, name: tiers.get(id)?.name ?? "That pass", max: tiers.get(id)?.max_per_order };
   };
+  if (message.includes("sold_out:online")) return json(req, { error: SOLD_OUT, code: "sold_out", remaining: 0 }, 409);
   if (message.includes("sold_out")) {
     const tier = tierOf("sold_out");
     return json(req, { error: `${tier.name} is sold out.`, remaining: 0, ticket_type: tier.id }, 409);

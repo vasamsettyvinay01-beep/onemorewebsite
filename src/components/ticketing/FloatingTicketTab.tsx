@@ -4,6 +4,7 @@ import { AnimatePresence, motion } from "motion/react";
 import type { OneMoreEvent } from "@/types/event";
 import { formatEventDate, formatEventTime } from "@/lib/events";
 import { ease } from "@/lib/motion";
+import { useLiveEvent } from "@/lib/availability";
 import { useSalesPhase } from "@/lib/use-lifecycle";
 import { useCommunity } from "@/components/community/CommunityProvider";
 import { useIntro } from "@/components/intro/IntroProvider";
@@ -17,7 +18,8 @@ interface FloatingTicketTabProps {
  * The first thing on the page: a large, bright way into the ticket flow.
  * The sheet still carries the featured event's campaign world.
  */
-export function FloatingTicketTab({ event }: FloatingTicketTabProps) {
+export function FloatingTicketTab({ event: staticEvent }: FloatingTicketTabProps) {
+  const event = useLiveEvent(staticEvent, true) ?? staticEvent;
   const { ready } = useIntro();
   const { open: communityOpen } = useCommunity();
   const { open: ticketOpen, openFor } = useTicketSheet();
