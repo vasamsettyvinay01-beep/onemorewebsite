@@ -14,7 +14,6 @@ import { Button } from "@/components/ui/Button";
 import { Reveal } from "@/components/motion/Reveal";
 import { EventFacts } from "@/components/events/EventFacts";
 import { MidnightArtwork } from "@/components/events/MidnightArtwork";
-import { SalesClosedNotice } from "@/components/ticketing/SalesClosedNotice";
 import { useTicketSheet } from "@/components/ticketing/TicketSheetProvider";
 import { useCanvas } from "../CanvasProvider";
 
@@ -139,8 +138,10 @@ export function ExperienceTakeover({ event: staticEvent }: Props) {
           )}
 
           {phase === "closed" && !comingSoon && (
-            <Reveal delay={0.25} className="mt-9 border-t border-white/12 pt-6 sm:mt-11">
-              <SalesClosedNotice event={event} />
+            <Reveal delay={0.25} className="mt-9 sm:mt-11">
+              <p className="font-display text-[clamp(2.2rem,5vw,3.4rem)] leading-none text-(--ev-text)">
+                Sold <span className="italic text-(--ev-accent)">out.</span>
+              </p>
             </Reveal>
           )}
 

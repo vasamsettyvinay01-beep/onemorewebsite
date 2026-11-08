@@ -10,7 +10,6 @@ import { Dialog } from "@/components/ui/Dialog";
 import { ComingSoonState } from "./states/ComingSoonState";
 import { CheckoutState } from "./states/CheckoutState";
 import { SoldOutState } from "./states/SoldOutState";
-import { SalesClosedNotice } from "./SalesClosedNotice";
 import { TicketArtwork } from "./TicketArtwork";
 
 interface TicketSheetProps {
@@ -47,9 +46,7 @@ export function TicketSheet({ open, event: staticEvent, onClose }: TicketSheetPr
         <p className="mt-4 text-sm text-ivory/55">This night has ended.</p>
       </div>
     );
-  } else if (phase === "closed") {
-    content = <SalesClosedNotice event={event} className="flex flex-1 flex-col justify-center px-8" />;
-  } else if (event.status === "sold-out") {
+  } else if (phase === "closed" || event.status === "sold-out") {
     content = <SoldOutState event={event} onClose={onClose} />;
   } else if (live) {
     content = <CheckoutState key={soldOutKey} event={event} provider={provider} onClose={onClose} />;

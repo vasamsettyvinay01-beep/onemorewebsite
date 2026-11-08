@@ -24,8 +24,8 @@ const NOV7_11PM = new Date("2026-11-07T23:00:00-06:00");
 const NOV8_115AM = new Date("2026-11-08T01:15:00-06:00");
 const NOV8_201AM = new Date("2026-11-08T02:01:00-06:00");
 
-test("Diwali sales close at 1:00 AM and the night ends at 2:00 AM Chicago on Nov 8", () => {
-  assert.equal(salesCloseAt(diwali)?.toISOString(), "2026-11-08T07:00:00.000Z");
+test("Diwali sales close at midnight and the night ends at 2:00 AM Chicago on Nov 8", () => {
+  assert.equal(salesCloseAt(diwali)?.toISOString(), "2026-11-08T06:00:00.000Z");
   assert.equal(eventEndsAt(diwali)?.toISOString(), "2026-11-08T08:00:00.000Z");
 });
 
@@ -64,10 +64,12 @@ test("case 1 — Nov 7 11:00 PM: Diwali leads and sells, New Year is upcoming", 
   assert.equal(salesWindowClosed(diwali.id, NOV7_11PM.getTime()), false);
 });
 
-test("case 2 — Nov 8 1:15 AM: Diwali still leads, sales are closed, New Year is upcoming", () => {
+test("case 2 — Nov 8 12:15 AM: Diwali still leads and shows sold out, New Year is upcoming", () => {
+  const at = new Date("2026-11-08T00:15:00-06:00");
+  assert.equal(salesPhase(diwali, at), "closed");
+  assert.equal(primaryEventAt(events, at)?.id, diwali.id);
+  assert.equal(salesWindowClosed(diwali.id, at.getTime()), true);
   assert.equal(salesPhase(diwali, NOV8_115AM), "closed");
-  assert.equal(primaryEventAt(events, NOV8_115AM)?.id, diwali.id);
-  assert.equal(salesWindowClosed(diwali.id, NOV8_115AM.getTime()), true);
 });
 
 test("case 3 — Nov 8 2:01 AM: New Year leads, Diwali is past and stays closed", () => {
@@ -78,7 +80,7 @@ test("case 3 — Nov 8 2:01 AM: New Year leads, Diwali is past and stays closed"
 });
 
 test("the boundaries are exact to the millisecond", () => {
-  const close = Date.parse("2026-11-08T07:00:00.000Z");
+  const close = Date.parse("2026-11-08T06:00:00.000Z");
   const end = Date.parse("2026-11-08T08:00:00.000Z");
   assert.equal(salesPhase(diwali, new Date(close - 1)), "open");
   assert.equal(salesPhase(diwali, new Date(close)), "closed");
@@ -94,7 +96,7 @@ test("the checkout function's cutoff is the same instant as the site's", () => {
     if (!event.saleEnd) continue;
     assert.equal(SALES_CLOSE_AT[event.id], salesCloseAt(event)?.toISOString(), `${event.id} cutoff differs between site and server`);
   }
-  assert.equal(SALES_CLOSED_MESSAGE, "Ticket sales are now closed.");
+  assert.equal(SALES_CLOSED_MESSAGE, "Sold out.");
 });
 
 test("an event without a cutoff is never closed by the sales window", () => {
@@ -106,7 +108,7 @@ test("the lifecycle instant only moves at a boundary", () => {
   const boundaries = lifecycleBoundaries(events);
   assert.deepEqual(
     boundaries.map((at) => new Date(at).toISOString()),
-    ["2026-11-08T07:00:00.000Z", "2026-11-08T08:00:00.000Z", "2027-01-02T08:00:00.000Z"],
+    ["2026-11-08T06:00:00.000Z", "2026-11-08T08:00:00.000Z", "2027-01-02T08:00:00.000Z"],
   );
   assert.equal(lastBoundary(boundaries, NOV7_11PM.getTime()), 0);
   assert.equal(lastBoundary(boundaries, NOV8_115AM.getTime()), boundaries[0]);

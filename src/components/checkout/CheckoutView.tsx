@@ -32,7 +32,6 @@ import { formatChapter, formatEventTime, getEventBySlug, getVisibleTiers, isOnSa
 import type { SalesPhase } from "@/lib/event-end";
 import { useSalesPhase } from "@/lib/use-lifecycle";
 import { cn } from "@/lib/cn";
-import { SalesClosedNotice } from "@/components/ticketing/SalesClosedNotice";
 import type { OneMoreEvent, TicketTier } from "@/types/event";
 
 const stripePromise = backend.stripeKey ? loadStripe(backend.stripeKey) : null;
@@ -877,20 +876,7 @@ function SoldOutCard() {
 
 function Closed({ event, phase }: { event: OneMoreEvent | null; phase: SalesPhase | null }) {
   const ended = phase === "ended";
-  if (event?.status === "sold-out") return <SoldOutCard />;
-  if (event && phase === "closed") {
-    return (
-      <div className="flex flex-1 flex-col items-center justify-center pb-24 text-center">
-        <SalesClosedNotice event={event} align="center" className="flex flex-col" />
-        <Link
-          href="/"
-          className="mt-10 border border-gold/70 px-8 py-3.5 text-[0.6rem] font-semibold uppercase tracking-[0.3em] text-gold transition-colors hover:bg-gold hover:text-rich"
-        >
-          Return home
-        </Link>
-      </div>
-    );
-  }
+  if (event?.status === "sold-out" || phase === "closed") return <SoldOutCard />;
   return (
     <div className="flex flex-1 flex-col items-center justify-center pb-24 text-center">
       <p className="font-display text-[clamp(2.2rem,8vw,3.2rem)] leading-none text-ivory">

@@ -44,7 +44,7 @@ if (at >= 0) {
   check("New Year record has no tiers", /ticketTiers:\[\]/.test(record));
 }
 check("test clock is not in production JS", !js.includes("lifecycle-now"));
-check("sales cutoff ships to the site", js.includes("2026-11-08T01:00"));
+check("sales cutoff ships to the site", js.includes("2026-11-08T00:00"));
 
 let failed = 0;
 for (const r of results) {

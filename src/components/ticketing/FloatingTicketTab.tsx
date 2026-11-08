@@ -27,8 +27,8 @@ export function FloatingTicketTab({ event: staticEvent }: FloatingTicketTabProps
   const date = formatEventDate(event);
   const city = event.city ?? event.venue?.city;
   const available = event.status !== "cancelled" && event.status !== "past";
-  const onSale = event.status === "on-sale";
-  const soldOut = event.status === "sold-out";
+  const onSale = event.status === "on-sale" && phase === "open";
+  const soldOut = event.status === "sold-out" || phase === "closed";
   const comingSoon = event.status === "coming-soon";
   const action = soldOut ? "View status" : onSale ? "Get tickets" : comingSoon ? "Coming soon" : "Get access";
   const urgency = soldOut
@@ -41,7 +41,7 @@ export function FloatingTicketTab({ event: staticEvent }: FloatingTicketTabProps
   const badge = soldOut ? "Closed" : onSale ? "ASAP" : comingSoon ? "Next" : "Soon";
   const time = comingSoon ? formatEventTime(event) : undefined;
   const age = comingSoon && event.minimumAge ? `${event.minimumAge}+` : undefined;
-  const show = ready && phase === "open" && available && !communityOpen && !ticketOpen;
+  const show = ready && (phase === "open" || phase === "closed") && available && !communityOpen && !ticketOpen;
 
   return (
     <AnimatePresence>
