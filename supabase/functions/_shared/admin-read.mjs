@@ -293,6 +293,37 @@ export function checkInPercent(checkedIn, expected) {
   return Math.round((checkedIn / expected) * 1000) / 10;
 }
 
+/**
+ * One row per admission ticket. A ticket is used only when its status is
+ * "checked-in"; cancelled (refunded) and revoked tickets are neither expected nor remaining.
+ */
+export function ticketCounts(tickets) {
+  const counts = { issued: 0, expected: 0, checkedIn: 0, remaining: 0, cancelled: 0 };
+  for (const ticket of Array.isArray(tickets) ? tickets : []) {
+    counts.issued += 1;
+    if (ticket.status === "cancelled" || ticket.status === "revoked") counts.cancelled += 1;
+    else {
+      counts.expected += 1;
+      if (ticket.status === "checked-in") counts.checkedIn += 1;
+      else counts.remaining += 1;
+    }
+  }
+  return counts;
+}
+
+/** Everyone admitted by ticket QR at the door: paid (card and cash) plus complimentary. VIP is counted on its own. */
+export function doorTotals(paid, complimentary) {
+  const expected = paid.expected + complimentary.expected;
+  const checkedIn = paid.checkedIn + complimentary.checkedIn;
+  return {
+    expected,
+    checkedIn,
+    remaining: paid.remaining + complimentary.remaining,
+    cancelled: paid.cancelled + complimentary.cancelled,
+    percent: checkInPercent(checkedIn, expected),
+  };
+}
+
 export function zoneForVenue(venue, address) {
   const text = `${venue ?? ""} ${address ?? ""}`.toLowerCase();
   if (/\bhouston\b|\btexas\b|\btx\b/.test(text)) return "America/Chicago";

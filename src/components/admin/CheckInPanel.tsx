@@ -6,6 +6,7 @@ import { useAdmin } from "./AdminShell";
 import { count, when } from "./format";
 import type { CheckInReport } from "./types";
 import { Chip, Empty, ErrorNote, Pager, Stat, toneFor } from "./ui";
+import { useLiveTick } from "./use-live-tick";
 
 export function CheckInPanel() {
   const { eventId } = useAdmin();
@@ -17,6 +18,7 @@ export function CheckInPanel() {
     setPage(1);
   }
   const requestKey = `${eventId}|${page}`;
+  const tick = useLiveTick();
 
   useEffect(() => {
     if (!eventId) return;
@@ -26,12 +28,14 @@ export function CheckInPanel() {
         if (!cancel) setLoaded({ key: requestKey, report: body, error: null });
       })
       .catch((err: unknown) => {
-        if (!cancel) setLoaded({ key: requestKey, report: null, error: err instanceof AdminApiError ? err.message : "Could not load check-in." });
+        if (cancel) return;
+        const error = err instanceof AdminApiError ? err.message : "Could not load check-in.";
+        setLoaded((prev) => (prev?.key === requestKey && prev.report ? prev : { key: requestKey, report: null, error }));
       });
     return () => {
       cancel = true;
     };
-  }, [eventId, page, requestKey]);
+  }, [eventId, page, requestKey, tick]);
 
   const current = loaded?.key === requestKey ? loaded : null;
   if (!eventId) return <Empty>Choose an event.</Empty>;
@@ -44,7 +48,7 @@ export function CheckInPanel() {
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold tracking-tight">Check-in</h1>
-          <p className="mt-1 text-sm text-white/50">Counts come from the door log. Scanning stays on the door system.</p>
+          <p className="mt-1 text-sm text-white/50">Paid and complimentary tickets, updated every 10 seconds. VIP groups are counted on the VIP page.</p>
         </div>
         <a href="/door" target="_blank" rel="noopener noreferrer" className="rounded-md border border-white/15 px-3 py-2 text-sm">
           Scanner access — verify
@@ -52,8 +56,8 @@ export function CheckInPanel() {
       </header>
       <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
         <Stat label="Expected admissions" value={count(report.expected)} hint={report.cancelled > 0 ? `${count(report.cancelled)} cancelled` : undefined} />
-        <Stat label="Checked in" value={count(report.checkedIn)} />
-        <Stat label="Remaining" value={count(report.remaining)} />
+        <Stat label="Checked in" value={count(report.checkedIn)} hint={`${count(report.paid.checkedIn)} paid · ${count(report.complimentary.checkedIn)} complimentary`} />
+        <Stat label="Remaining" value={count(report.remaining)} hint={`${count(report.paid.remaining)} paid · ${count(report.complimentary.remaining)} complimentary`} />
         <Stat label="Check-in percentage" value={report.percent == null ? "—" : `${report.percent}%`} />
       </div>
       {report.expected === 0 && <p className="text-sm text-white/45">No admissions are currently expected.</p>}

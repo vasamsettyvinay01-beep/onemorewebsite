@@ -150,6 +150,8 @@ export interface Overview {
   uncappedTiers: number;
   checkedIn: number;
   guestsRemaining: number;
+  complimentaryCheckedIn: number;
+  complimentaryRemaining: number;
   ticketSubtotal: number | null;
   taxCollected: number | null;
   refundedAmount: number;
@@ -202,12 +204,21 @@ export interface TicketRecord {
   eventName?: string;
 }
 
+export interface DoorCounts {
+  expected: number;
+  checkedIn: number;
+  remaining: number;
+  cancelled: number;
+}
+
 export interface CheckInReport {
   expected: number;
   checkedIn: number;
   remaining: number;
   cancelled: number;
   percent: number | null;
+  paid: DoorCounts;
+  complimentary: DoorCounts;
   scans: { at: string; ref: string | null; tier: string | null; result: string }[];
   page: number;
   pageSize: number;

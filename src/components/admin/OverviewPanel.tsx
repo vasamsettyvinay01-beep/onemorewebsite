@@ -7,11 +7,13 @@ import { useAdmin } from "./AdminShell";
 import { count, inRange, money, when } from "./format";
 import type { Overview, TimelinePoint } from "./types";
 import { Chip, Empty, ErrorNote, Panel, Stat, toneFor } from "./ui";
+import { useLiveTick } from "./use-live-tick";
 
 export function OverviewPanel() {
   const { eventId, event } = useAdmin();
   const [loaded, setLoaded] = useState<{ eventId: string; data: Overview | null; error: string | null } | null>(null);
   const [range, setRange] = useState<"today" | "7d" | "all">("7d");
+  const tick = useLiveTick();
 
   useEffect(() => {
     if (!eventId) return;
@@ -21,12 +23,14 @@ export function OverviewPanel() {
         if (!cancel) setLoaded({ eventId, data: body, error: null });
       })
       .catch((err: unknown) => {
-        if (!cancel) setLoaded({ eventId, data: null, error: err instanceof AdminApiError ? err.message : "Could not load the overview." });
+        if (cancel) return;
+        const error = err instanceof AdminApiError ? err.message : "Could not load the overview.";
+        setLoaded((prev) => (prev?.eventId === eventId && prev.data ? prev : { eventId, data: null, error }));
       });
     return () => {
       cancel = true;
     };
-  }, [eventId]);
+  }, [eventId, tick]);
 
   const current = loaded?.eventId === eventId ? loaded : null;
   if (!eventId) return <Empty>No event is available.</Empty>;
@@ -65,8 +69,8 @@ export function OverviewPanel() {
         <Stat label="Admissions sold" value={count(data.admissionsSold)} hint={`${count(data.passesIssued)} issued`} />
         <Stat label="Capacity" value={data.capacity == null ? "No cap" : count(data.capacity)} hint={capacityHint} />
         <Stat label="Remaining capacity" value={data.remainingCapacity == null ? "—" : count(data.remainingCapacity)} hint={capacityHint} />
-        <Stat label="Checked in" value={count(data.checkedIn)} />
-        <Stat label="Guests remaining" value={count(data.guestsRemaining)} />
+        <Stat label="Checked in" value={count(data.checkedIn)} hint={`Includes ${count(data.complimentaryCheckedIn)} complimentary`} />
+        <Stat label="Guests remaining" value={count(data.guestsRemaining)} hint={`Includes ${count(data.complimentaryRemaining)} complimentary`} />
         <Stat label="Active holds" value={count(data.activeHolds)} />
       </div>
 

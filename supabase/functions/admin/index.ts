@@ -18,11 +18,11 @@ import {
   sanitizeAuditSummary,
 } from "../_shared/staff-auth.mjs";
 import {
-  checkInPercent,
   cleanSearch,
   dayKey,
   displayScanResult,
   displayTicketStatus,
+  doorTotals,
   emailLabel,
   isBlockedAction,
   isLegacyDoorAccount,
@@ -57,6 +57,7 @@ import {
   refundPhraseOk,
   safeResource,
   splitCharge,
+  ticketCounts,
   ticketRefFromId,
   zoneForVenue,
 } from "../_shared/admin-read.mjs";
@@ -449,18 +450,14 @@ async function metrics(eventId: string) {
   }
   const issued = new Map<string, number>();
   const live = new Map<string, number>();
-  let cancelled = 0;
-  let checkedIn = 0;
-  let activeAdmissions = 0;
   for (const ticket of tickets) {
     issued.set(ticket.tier_id, (issued.get(ticket.tier_id) ?? 0) + 1);
-    if (ticket.status === "cancelled" || ticket.status === "revoked") cancelled += 1;
-    else {
-      activeAdmissions += 1;
-      live.set(ticket.tier_id, (live.get(ticket.tier_id) ?? 0) + 1);
-      if (ticket.status === "checked-in") checkedIn += 1;
-    }
+    if (ticket.status !== "cancelled" && ticket.status !== "revoked") live.set(ticket.tier_id, (live.get(ticket.tier_id) ?? 0) + 1);
   }
+  const admissions = ticketCounts(tickets);
+  const cancelled = admissions.cancelled;
+  const checkedIn = admissions.checkedIn;
+  const activeAdmissions = admissions.expected;
   let cappedCapacity: number | null = null;
   let cappedRemaining: number | null = null;
   let uncapped = 0;
@@ -531,17 +528,27 @@ async function overview(eventId: string) {
   if (!eventId) return { error: "eventId required" };
   const summary = await metrics(eventId);
   if ("error" in summary) return summary;
-  const { data, error } = await admin
-    .from("orders")
-    .select(ORDER_COLUMNS)
-    .eq("event_id", eventId)
-    .eq("is_test", false)
-    .eq("is_complimentary", false)
-    .order("created_at", { ascending: false })
-    .limit(8);
+  const [{ data, error }, door] = await Promise.all([
+    admin
+      .from("orders")
+      .select(ORDER_COLUMNS)
+      .eq("event_id", eventId)
+      .eq("is_test", false)
+      .eq("is_complimentary", false)
+      .order("created_at", { ascending: false })
+      .limit(8),
+    doorAdmissions(eventId, summary),
+  ]);
   if (error) throw error;
   const recent = await presentOrders((data ?? []) as OrderRow[], summary.tiers, summary.event.name);
-  return { ...summary, recentOrders: recent };
+  return {
+    ...summary,
+    checkedIn: door.checkedIn,
+    guestsRemaining: door.remaining,
+    complimentaryCheckedIn: door.complimentary.checkedIn,
+    complimentaryRemaining: door.complimentary.remaining,
+    recentOrders: recent,
+  };
 }
 
 interface PromotionRow {
@@ -1128,20 +1135,31 @@ async function checkin(body: Record<string, unknown>) {
   if (!page) return { error: "Bad filter" };
   const summary = await metrics(eventId);
   if ("error" in summary) return summary;
-  const expected = summary.admissionsSold;
-  const scans = await recentScans(eventId);
+  const [door, scans] = await Promise.all([doorAdmissions(eventId, summary), recentScans(eventId)]);
   const slice = scans.slice(page.from, page.to + 1);
   return {
-    expected,
-    checkedIn: summary.checkedIn,
-    remaining: summary.guestsRemaining,
-    cancelled: summary.cancelledPasses,
-    percent: checkInPercent(summary.checkedIn, expected),
+    ...door,
     scans: slice,
     page: page.page,
     pageSize: page.pageSize,
     total: scans.length,
   };
+}
+
+// Sales metrics leave complimentary passes out; the door admits them, so door counts include them.
+async function doorAdmissions(
+  eventId: string,
+  summary: { admissionsSold: number; checkedIn: number; guestsRemaining: number; cancelledPasses: number },
+) {
+  const comp = await complimentaryMetrics(eventId);
+  const paid = {
+    expected: summary.admissionsSold,
+    checkedIn: summary.checkedIn,
+    remaining: summary.guestsRemaining,
+    cancelled: summary.cancelledPasses,
+  };
+  const complimentary = { expected: comp.admitted + comp.remaining, checkedIn: comp.admitted, remaining: comp.remaining, cancelled: comp.revoked };
+  return { ...doorTotals(paid, complimentary), paid, complimentary };
 }
 
 interface ScanOrder {
@@ -1175,7 +1193,6 @@ async function recentScans(eventId: string) {
   const matched = rows.filter((row) =>
     (!row.tickets || row.tickets.event_id === eventId)
     && !orderOf(row)?.is_test
-    && !orderOf(row)?.is_complimentary
   );
   return matched.map((row) => {
     const order = orderOf(row);
