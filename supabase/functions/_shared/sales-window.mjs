@@ -7,8 +7,8 @@
 // admin operations do not read this.
 
 export const SALES_CLOSE_AT = Object.freeze({
-  // Diwali Night: Sunday 2026-11-08 00:00 CST. After this the site shows sold out.
-  evt_diwali_night: "2026-11-08T06:00:00.000Z",
+  // Diwali Night: Saturday 2026-11-07 22:00 CST. After this the site shows sold out.
+  evt_diwali_night: "2026-11-08T04:00:00.000Z",
 });
 
 export const SALES_CLOSED_MESSAGE = "Sold out.";

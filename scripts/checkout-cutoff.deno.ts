@@ -113,9 +113,9 @@ async function run(at: string, expectClosed: boolean) {
   check(releasedBody.code !== "sales_closed", "release of an unpaid hold still allowed", `${released.status}`);
 }
 
-await run("2026-11-07T23:00:00-06:00", false);
-await run("2026-11-07T23:59:59.999-06:00", false);
-await run("2026-11-08T00:00:00.000-06:00", true);
+await run("2026-11-07T21:59:59.999-06:00", false);
+await run("2026-11-07T22:00:00.000-06:00", true);
+await run("2026-11-07T23:00:00-06:00", true);
 await run("2026-11-08T00:15:00-06:00", true);
 await run("2026-11-08T02:01:00-06:00", true);
 

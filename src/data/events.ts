@@ -119,10 +119,10 @@ export const events: OneMoreEvent[] = [
         height: 232,
       },
     ],
-    // Public checkout closes at midnight and the site shows sold out. The night
+    // Public checkout closed at 10:00 PM and the site shows sold out. The night
     // itself runs until 2:00 AM. The checkout function enforces the same instant
     // from supabase/functions/_shared/sales-window.mjs.
-    saleEnd: "2026-11-08T00:00",
+    saleEnd: "2026-11-07T22:00",
     // Selling: run `npm run stripe:setup` after any tier change (it syncs prices to the backend),
     // then set status: "on-sale".
     ticketTiers: [
