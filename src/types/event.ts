@@ -123,6 +123,11 @@ export interface OneMoreEvent {
   theme: EventTheme;
   /** ISO 8601 date (YYYY-MM-DD). Omit if not announced. */
   date?: string;
+  /**
+   * Keep the date off every public surface (homepage, metadata, passes, checkout)
+   * while `date` still drives the sales window and the end of the night.
+   */
+  dateHidden?: boolean;
   /** 24h time (HH:MM) in the venue's local time. Omit if not announced. */
   startTime?: string;
   endTime?: string;

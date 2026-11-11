@@ -28,7 +28,7 @@ import {
   type Quantities,
   type QuoteLine,
 } from "@/lib/cart";
-import { formatChapter, formatEventTime, getEventBySlug, getVisibleTiers, isOnSale, waitingFor } from "@/lib/events";
+import { formatChapter, formatEventTime, getEventBySlug, getVisibleTiers, hasPublicDate, isOnSale, waitingFor } from "@/lib/events";
 import type { SalesPhase } from "@/lib/event-end";
 import { useSalesPhase } from "@/lib/use-lifecycle";
 import { cn } from "@/lib/cn";
@@ -143,7 +143,7 @@ const fonts: StripeElementsOptions["fonts"] = [
 ];
 
 function longDate(event: OneMoreEvent): string | undefined {
-  if (!event.date) return undefined;
+  if (!hasPublicDate(event)) return undefined;
   return new Intl.DateTimeFormat("en-US", { weekday: "long", month: "long", day: "numeric" }).format(
     new Date(`${event.date}T12:00:00`),
   );

@@ -3,7 +3,7 @@
 import type { ReactNode } from "react";
 import { events } from "@/data/events";
 import { eventSeries, hasEventEnded, primaryEventAt } from "@/lib/event-end";
-import { formatChapter, formatEventTime } from "@/lib/events";
+import { formatChapter, formatEventTime, hasPublicDate } from "@/lib/events";
 import { useLifecycleInstantFrom } from "@/lib/use-lifecycle";
 import type { OneMoreEvent } from "@/types/event";
 import { FloatingTicketTab } from "@/components/ticketing/FloatingTicketTab";
@@ -19,7 +19,7 @@ interface Props {
 }
 
 const shortDate = (event: OneMoreEvent) =>
-  event.date
+  hasPublicDate(event)
     ? new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" })
         .format(new Date(`${event.date}T12:00:00Z`))
         .toUpperCase()

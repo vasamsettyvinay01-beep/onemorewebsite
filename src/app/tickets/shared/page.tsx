@@ -7,7 +7,7 @@ import { brand } from "@/data/brand";
 import { events } from "@/data/events";
 import { functionUrl } from "@/data/backend";
 import { refundPolicy } from "@/data/refund-policy";
-import { formatEventTime } from "@/lib/events";
+import { formatEventTime, hasPublicDate } from "@/lib/events";
 import { passStanding } from "@/lib/pass-standing";
 
 interface SharedPass {
@@ -80,7 +80,7 @@ export default function SharedTicketPage() {
   const event = events.find((item) => item.id === pass?.eventId);
   const label = pass ? passStanding(pass.status, pass.orderStatus) : "INVALID";
   const blocked = label !== "VALID";
-  const when = event ? [event.date, formatEventTime(event)].filter(Boolean).join(" · ") : "";
+  const when = event ? [hasPublicDate(event) ? event.date : undefined, formatEventTime(event)].filter(Boolean).join(" · ") : "";
 
   return (
     <main className="mx-auto flex min-h-[100svh] max-w-md flex-col bg-[#0A0A09] px-5 py-8 text-ivory">

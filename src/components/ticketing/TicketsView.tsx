@@ -8,7 +8,7 @@ import QRCode from "qrcode";
 import { brand } from "@/data/brand";
 import { events } from "@/data/events";
 import { backendConfigured, functionUrl } from "@/data/backend";
-import { formatChapter, formatEventTime } from "@/lib/events";
+import { formatChapter, formatEventTime, hasPublicDate } from "@/lib/events";
 import { cn } from "@/lib/cn";
 import type { OneMoreEvent } from "@/types/event";
 import { DiwaliFireworks } from "@/components/ticketing/DiwaliFireworks";
@@ -58,7 +58,7 @@ function properName(name: string | null): string | null {
 const time = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 
 function longDate(event: OneMoreEvent): string | undefined {
-  if (!event.date) return undefined;
+  if (!hasPublicDate(event)) return undefined;
   return new Intl.DateTimeFormat("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" }).format(
     new Date(`${event.date}T12:00:00`),
   );

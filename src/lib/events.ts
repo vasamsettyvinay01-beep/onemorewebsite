@@ -53,8 +53,13 @@ export function formatMoney(cents: number, currency: string, locale = "en-US"): 
   }).format(cents / 100);
 }
 
+/** Whether the event's date may be shown publicly. */
+export function hasPublicDate(event: Pick<OneMoreEvent, "date" | "dateHidden">): boolean {
+  return !!event.date && !event.dateHidden;
+}
+
 export function formatEventDate(event: OneMoreEvent, locale = "en-US"): string | undefined {
-  if (!event.date) return undefined;
+  if (!hasPublicDate(event)) return undefined;
   const date = new Date(`${event.date}T12:00:00`);
   return new Intl.DateTimeFormat(locale, {
     weekday: "short",

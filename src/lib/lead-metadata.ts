@@ -1,4 +1,5 @@
 import { brand } from "@/data/brand";
+import { hasPublicDate } from "@/lib/events";
 import type { OneMoreEvent } from "@/types/event";
 
 export interface LeadMetadata {
@@ -7,7 +8,7 @@ export interface LeadMetadata {
 }
 
 const longDate = (event: OneMoreEvent) =>
-  event.date
+  hasPublicDate(event)
     ? new Intl.DateTimeFormat("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric", timeZone: "UTC" }).format(
         new Date(`${event.date}T12:00:00Z`),
       )

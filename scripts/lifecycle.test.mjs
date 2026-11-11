@@ -39,6 +39,12 @@ test("New Year Night runs Jan 1 2027, 9 PM to 2 AM Chicago, 21+", () => {
   assert.equal(eventEndsAt(newYear)?.toISOString(), "2027-01-02T08:00:00.000Z");
 });
 
+test("New Year Night's date is kept for the lifecycle but hidden from the public site", () => {
+  assert.equal(newYear.date, "2027-01-01");
+  assert.equal(newYear.dateHidden, true);
+  assert.notEqual(diwali.dateHidden, true);
+});
+
 test("New Year Night has no venue, no tiers and no checkout", () => {
   assert.equal(newYear.venue, undefined);
   assert.equal(newYear.city, "Houston");

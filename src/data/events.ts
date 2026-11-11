@@ -199,6 +199,9 @@ export const events: OneMoreEvent[] = [
       motif: "midnight",
     },
     date: "2027-01-01",
+    // The date is not confirmed publicly yet. It stays in `date` so the night
+    // still ends on time; `dateHidden` keeps it off the site.
+    dateHidden: true,
     startTime: "21:00",
     endTime: "02:00",
     minimumAge: 21,
